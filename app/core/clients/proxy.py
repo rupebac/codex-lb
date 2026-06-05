@@ -80,6 +80,8 @@ IGNORE_INBOUND_HEADERS = {
     "true-client-ip",
 }
 
+CODEX_INSTALLATION_ID_HEADER: Final[str] = "x-codex-installation-id"
+
 # Stable per-installation identifiers that the Codex CLI may send. These
 # are intentionally cross-account-correlating signals: two coworkers
 # behind the same NAT naturally share an IP but never share a device or
@@ -97,6 +99,7 @@ FINGERPRINT_HEADER_DENY: frozenset[str] = frozenset(
         "x-oai-device-id",
         "x-openai-device-id",
         "oai-installation-id",
+        CODEX_INSTALLATION_ID_HEADER,
         "x-oai-installation-id",
         "x-openai-installation-id",
     }
@@ -1138,6 +1141,22 @@ def _is_native_codex_originator(originator: str | None) -> bool:
     return stripped in _NATIVE_CODEX_ORIGINATORS
 
 
+def apply_codex_installation_metadata(
+    payload: JsonObject,
+    codex_installation_id: str | None,
+) -> JsonObject:
+    if not codex_installation_id:
+        return payload
+    updated = dict(payload)
+    raw_metadata = updated.get("client_metadata")
+    metadata: dict[str, JsonValue] = {}
+    if is_json_mapping(raw_metadata):
+        metadata.update(raw_metadata)
+    metadata[CODEX_INSTALLATION_ID_HEADER] = codex_installation_id
+    updated["client_metadata"] = metadata
+    return updated
+
+
 def _payload_uses_image_generation_tool(payload: Mapping[str, JsonValue]) -> bool:
     tools = payload.get("tools")
     if not isinstance(tools, list):
@@ -1992,6 +2011,7 @@ async def stream_responses(
     session: aiohttp.ClientSession | None = None,
     upstream_stream_transport_override: str | None = None,
     chatgpt_account_id: str | None = None,
+    codex_installation_id: str | None = None,
 ) -> AsyncIterator[str]:
     async with lease_account_http_session(account_id or "", session) as client_session:
         async for event_block in _stream_responses_with_session(
@@ -2004,6 +2024,7 @@ async def stream_responses(
             session=client_session,
             upstream_stream_transport_override=upstream_stream_transport_override,
             chatgpt_account_id=chatgpt_account_id,
+            codex_installation_id=codex_installation_id,
         ):
             yield event_block
 
@@ -2018,6 +2039,7 @@ async def _stream_responses_with_session(
     raise_for_status: bool = False,
     upstream_stream_transport_override: str | None = None,
     chatgpt_account_id: str | None = None,
+    codex_installation_id: str | None = None,
 ) -> AsyncIterator[str]:
     settings = get_settings()
     upstream_base = (base_url or settings.upstream_base_url).rstrip("/")
@@ -2046,6 +2068,7 @@ async def _stream_responses_with_session(
             _as_image_fetch_session(client_session),
             effective_connect_timeout,
         )
+    payload_dict = apply_codex_installation_metadata(payload_dict, codex_installation_id)
     payload_json = json.dumps(payload_dict, ensure_ascii=True, separators=(",", ":"))
     payload_size_estimate_bytes = len(payload_json.encode("utf-8"))
     transport_mode = _configured_stream_transport(
@@ -2494,6 +2517,7 @@ async def compact_responses(
     session: aiohttp.ClientSession | None = None,
     *,
     chatgpt_account_id: str | None = None,
+    codex_installation_id: str | None = None,
 ) -> CompactResponsePayload:
     async with lease_account_http_session(account_id or "", session) as client_session:
         transport = _CompactCommandTransport(
@@ -2502,6 +2526,7 @@ async def compact_responses(
             access_token=access_token,
             account_id=account_id,
             chatgpt_account_id=chatgpt_account_id,
+            codex_installation_id=codex_installation_id,
             session=client_session,
         )
         return await transport.execute()
@@ -2519,6 +2544,7 @@ class _CompactCommandTransport:
     account_id: str | None
     session: aiohttp.ClientSession
     chatgpt_account_id: str | None = None
+    codex_installation_id: str | None = None
 
     async def execute(self) -> CompactResponsePayload:
         settings = get_settings()
@@ -2531,6 +2557,8 @@ class _CompactCommandTransport:
             accept="application/json",
             chatgpt_account_id=self.chatgpt_account_id,
         )
+        if self.codex_installation_id:
+            upstream_headers[CODEX_INSTALLATION_ID_HEADER] = self.codex_installation_id
         pre_request_started_at = time.monotonic()
         compact_timeout_seconds = _effective_compact_total_timeout(settings.upstream_compact_timeout_seconds)
         effective_connect_timeout = _effective_compact_connect_timeout(settings.upstream_connect_timeout_seconds)

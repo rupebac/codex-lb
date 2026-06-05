@@ -22,7 +22,7 @@ from app.core.utils.request_id import get_request_id
 from app.core.utils.time import utcnow
 from app.db.models import Account, AccountStatus, UsageHistory
 from app.modules.accounts.auth_manager import AccountsRepositoryPort, AuthManager
-from app.modules.proxy.account_cache import get_account_selection_cache
+from app.modules.proxy.account_cache import get_account_selection_cache, mark_account_routing_unavailable
 from app.modules.usage.additional_quota_keys import canonicalize_additional_quota_key
 from app.modules.usage.repository import AdditionalUsageRepository
 
@@ -461,6 +461,7 @@ class UsageUpdater:
         updated = await self._auth_manager._repo.update_status(account.id, AccountStatus.DEACTIVATED, reason)
         if updated:
             await invalidate_account_client(account.id)
+            mark_account_routing_unavailable(account.id)
             get_account_selection_cache().invalidate()
         account.status = AccountStatus.DEACTIVATED
         account.deactivation_reason = reason

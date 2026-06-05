@@ -106,7 +106,6 @@ export function ProxyFormSection({
               <Input
                 id={portId}
                 inputMode="numeric"
-                pattern="\d*"
                 placeholder="1080"
                 value={values.portText}
                 onChange={(event) => set("portText", event.target.value)}

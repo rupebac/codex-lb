@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 
 import pytest
@@ -624,12 +625,14 @@ async def test_run_startup_migrations_drops_accounts_email_unique_with_non_casca
                     INSERT INTO accounts (
                         id, chatgpt_account_id, email, plan_type,
                         access_token_encrypted, refresh_token_encrypted, id_token_encrypted,
-                        last_refresh, created_at, status, deactivation_reason, reset_at
+                        last_refresh, created_at, status, deactivation_reason, reset_at,
+                        codex_installation_id
                     )
                     VALUES (
                         'acc_legacy_2', 'chatgpt_legacy_2', 'legacy@example.com', 'team',
                         x'11', x'12', x'13',
-                        '2026-01-01 00:00:00', '2026-01-01 00:00:00', 'active', NULL, NULL
+                        '2026-01-01 00:00:00', '2026-01-01 00:00:00', 'active', NULL, NULL,
+                        '22222222-2222-4222-8222-222222222222'
                     )
                     """
                 )
@@ -826,7 +829,7 @@ async def test_accounts_proxy_columns_upgrade_preserves_existing_rows(tmp_path):
                         """
                         SELECT id, email, proxy_host, proxy_port, proxy_username,
                                proxy_password_encrypted, proxy_remote_dns, proxy_label,
-                               proxy_last_validated_at
+                               proxy_last_validated_at, codex_installation_id
                         FROM accounts
                         WHERE id = 'acc_proxy_seed'
                         """
@@ -842,5 +845,6 @@ async def test_accounts_proxy_columns_upgrade_preserves_existing_rows(tmp_path):
             assert bool(row[6]) is True  # proxy_remote_dns default true
             assert row[7] is None  # proxy_label
             assert row[8] is None  # proxy_last_validated_at
+            assert str(uuid.UUID(row[9])) == row[9]  # codex_installation_id
     finally:
         await engine.dispose()

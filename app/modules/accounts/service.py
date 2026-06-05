@@ -48,7 +48,11 @@ from app.modules.accounts.schemas import (
     OpenCodeOAuthAuth,
 )
 from app.modules.limit_warmup.repository import LimitWarmupRepository
-from app.modules.proxy.account_cache import get_account_selection_cache
+from app.modules.proxy.account_cache import (
+    clear_account_routing_unavailable,
+    get_account_selection_cache,
+    mark_account_routing_unavailable,
+)
 from app.modules.usage.additional_quota_keys import get_additional_display_label_for_quota_key
 from app.modules.usage.repository import AdditionalUsageRepository, UsageRepository
 from app.modules.usage.updater import AdditionalUsageRepositoryPort, UsageUpdater
@@ -319,6 +323,8 @@ class AccountsService:
         if self._usage_repo and self._usage_updater:
             latest_usage = await self._usage_repo.latest_by_account(window="primary")
             await self._usage_updater.refresh_accounts([saved], latest_usage)
+        if saved.status == AccountStatus.ACTIVE:
+            clear_account_routing_unavailable(saved.id)
         get_account_selection_cache().invalidate()
         return saved
 
@@ -357,6 +363,8 @@ class AccountsService:
         if self._usage_repo and self._usage_updater:
             latest_usage = await self._usage_repo.latest_by_account(window="primary")
             await self._usage_updater.refresh_accounts([saved], latest_usage)
+        if saved.status == AccountStatus.ACTIVE:
+            clear_account_routing_unavailable(saved.id)
         get_account_selection_cache().invalidate()
         return saved
 
@@ -394,12 +402,14 @@ class AccountsService:
             # window so a freshly-reactivated account does not inherit the
             # stale failure timestamps that triggered its prior deactivation.
             await invalidate_account_client(account_id)
+            clear_account_routing_unavailable(account_id)
             get_account_selection_cache().invalidate()
         return result
 
     async def pause_account(self, account_id: str) -> bool:
         result = await self._repo.update_status(account_id, AccountStatus.PAUSED, None, None, blocked_at=None)
         if result:
+            mark_account_routing_unavailable(account_id)
             get_account_selection_cache().invalidate()
         return result
 
@@ -415,6 +425,7 @@ class AccountsService:
             # this id back (rare, but generated_unique_account_id can
             # collide on aggressive id reuse).
             await invalidate_account_client(account_id)
+            mark_account_routing_unavailable(account_id)
             get_account_selection_cache().invalidate()
             get_api_key_cache().clear()
             poller = get_cache_invalidation_poller()
@@ -556,7 +567,8 @@ class AccountsService:
         )
         if not updated:
             raise AccountNotFoundError(account_id)
-        await self._reactivate_after_proxy_repair(account_id)
+        if await self._reactivate_after_proxy_repair(account_id):
+            clear_account_routing_unavailable(account_id)
         # Drop any cached per-account ClientSession so subsequent leases
         # rebuild against the new (or revalidated) configuration.
         await invalidate_account_client(account_id)
@@ -621,15 +633,16 @@ class AccountsService:
 
         cleared = await self._repo.clear_proxy(account_id)
         if cleared:
-            await self._reactivate_after_proxy_repair(account_id)
+            if await self._reactivate_after_proxy_repair(account_id):
+                clear_account_routing_unavailable(account_id)
             await invalidate_account_client(account_id)
             get_account_selection_cache().invalidate()
         return cleared
 
-    async def _reactivate_after_proxy_repair(self, account_id: str) -> None:
+    async def _reactivate_after_proxy_repair(self, account_id: str) -> bool:
         """Bring proxy-failure-deactivated accounts back after operator repair."""
 
-        await self._repo.update_status_if_current(
+        return await self._repo.update_status_if_current(
             account_id,
             AccountStatus.ACTIVE,
             deactivation_reason=None,

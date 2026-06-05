@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { parseProxyPort, parseQuickPaste } from "@/features/accounts/components/proxy-form-state";
 import { useSetAccountProxy } from "@/features/accounts/hooks/use-accounts";
 import { formatProbeError } from "@/features/accounts/proxy-errors";
 import {
@@ -82,6 +83,7 @@ function AccountProxyForm({
 }: AccountProxyFormProps) {
   const setProxy = useSetAccountProxy();
 
+  const [quickPaste, setQuickPaste] = useState("");
   const [host, setHost] = useState(() => existing?.host ?? "");
   const [portText, setPortText] = useState(() => (existing ? String(existing.port) : "1080"));
   const [username, setUsername] = useState(() => existing?.username ?? "");
@@ -93,12 +95,20 @@ function AccountProxyForm({
   const [label, setLabel] = useState(() => existing?.label ?? "");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const portValue = useMemo(() => {
-    const trimmed = portText.trim();
-    if (!trimmed) return Number.NaN;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) && Number.isInteger(parsed) ? parsed : Number.NaN;
-  }, [portText]);
+  const portValue = useMemo(() => parseProxyPort(portText), [portText]);
+
+  const handleQuickPasteChange = (value: string) => {
+    setQuickPaste(value);
+    const pasted = parseQuickPaste(value);
+    if (!pasted) return;
+    if (pasted.host !== undefined) setHost(pasted.host);
+    if (pasted.portText !== undefined) setPortText(pasted.portText);
+    if (pasted.username !== undefined) setUsername(pasted.username);
+    if (pasted.password !== undefined) {
+      setPassword(pasted.password);
+      setPasswordMode("replace");
+    }
+  };
 
   const localValidation = useMemo(() => {
     const payload = {
@@ -140,6 +150,18 @@ function AccountProxyForm({
 
   return (
     <form className="space-y-4" onSubmit={handleSubmit}>
+      <div className="space-y-1.5">
+        <Label htmlFor="proxy-quick">Quick paste</Label>
+        <Input
+          id="proxy-quick"
+          autoComplete="off"
+          placeholder="user:pass@host:port"
+          value={quickPaste}
+          onChange={(event) => handleQuickPasteChange(event.target.value)}
+          disabled={submitting}
+        />
+      </div>
+
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
           <Label htmlFor="proxy-host">Host</Label>
@@ -157,7 +179,6 @@ function AccountProxyForm({
           <Input
             id="proxy-port"
             inputMode="numeric"
-            pattern="\\d*"
             placeholder="1080"
             value={portText}
             onChange={(event) => setPortText(event.target.value)}

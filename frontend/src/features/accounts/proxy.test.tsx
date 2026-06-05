@@ -6,6 +6,7 @@ import {
   AccountProxySummarySchema,
 } from "@/features/accounts/schemas";
 import { formatProbeError, probeReasonFromError } from "@/features/accounts/proxy-errors";
+import { parseQuickPaste } from "@/features/accounts/components/proxy-form-state";
 
 const proxyUserFixture = "proxy-user-fixture";
 
@@ -94,6 +95,24 @@ describe("AccountProxySummarySchema", () => {
     };
     const parsed = AccountProxySummarySchema.parse(raw);
     expect("password" in parsed).toBe(false);
+  });
+});
+
+describe("parseQuickPaste", () => {
+  it("parses user password host and port", () => {
+    expect(parseQuickPaste("proxy-user:secret@198.3.23.177:12324")).toEqual({
+      username: "proxy-user",
+      password: "secret",
+      host: "198.3.23.177",
+      portText: "12324",
+    });
+  });
+
+  it("parses host and port without auth", () => {
+    expect(parseQuickPaste("socks5h://proxy.example.com:1080")).toEqual({
+      host: "proxy.example.com",
+      portText: "1080",
+    });
   });
 });
 

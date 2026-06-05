@@ -1,0 +1,10 @@
+- [x] Change the default usage refresh interval to 120 seconds.
+- [x] Stagger background usage refresh so one non-deactivated account is attempted per equal interval slice.
+- [x] Add a per-account Codex installation id column and migration backfill.
+- [x] Inject the stored Codex installation id into upstream Codex request metadata.
+- [x] Strip inbound client Codex installation ids before upstream forwarding.
+- [x] Classify refresh-bound `app_session_terminated` as a permanent deactivation signal.
+- [x] Add focused unit coverage for installation metadata and scheduler staggering.
+- [x] Update OpenSpec requirements for installation identity and staggered usage refresh.
+- [x] Run focused tests.
+- [x] Run OpenSpec validation.

@@ -52,13 +52,14 @@ async def test_usage_refresh_singleflight_cancel_all_cancels_inflight_task() -> 
     started = asyncio.Event()
     cancelled = asyncio.Event()
 
-    async def factory():
+    async def factory() -> usage_updater_module.AccountRefreshResult:
         started.set()
         try:
-            await asyncio.Future()
+            await asyncio.Future[None]()
         except asyncio.CancelledError:
             cancelled.set()
             raise
+        raise AssertionError("singleflight factory should stay pending")
 
     task = asyncio.create_task(usage_updater_module._USAGE_REFRESH_SINGLEFLIGHT.run("acc_cancel", factory))
     await started.wait()
@@ -99,13 +100,14 @@ async def test_usage_refresh_scheduler_stop_cancels_inflight_singleflight_withou
     started = asyncio.Event()
     cancelled = asyncio.Event()
 
-    async def factory():
+    async def factory() -> usage_updater_module.AccountRefreshResult:
         started.set()
         try:
-            await asyncio.Future()
+            await asyncio.Future[None]()
         except asyncio.CancelledError:
             cancelled.set()
             raise
+        raise AssertionError("singleflight factory should stay pending")
 
     task = asyncio.create_task(usage_updater_module._USAGE_REFRESH_SINGLEFLIGHT.run("acc_stop_no_task", factory))
     await started.wait()
@@ -116,6 +118,44 @@ async def test_usage_refresh_scheduler_stop_cancels_inflight_singleflight_withou
         await task
     assert cancelled.is_set()
     assert usage_updater_module._USAGE_REFRESH_SINGLEFLIGHT._inflight == {}
+
+
+def test_usage_refresh_scheduler_orders_accounts_and_skips_deactivated() -> None:
+    active_b = _make_account("acc_b", "workspace_b")
+    deactivated = _make_account("acc_deactivated", "workspace_deactivated")
+    deactivated.status = AccountStatus.DEACTIVATED
+    active_a = _make_account("acc_a", "workspace_a")
+
+    ordered = refresh_scheduler_module._ordered_usage_refresh_accounts([active_b, deactivated, active_a])
+
+    assert [account.id for account in ordered] == ["acc_a", "acc_b"]
+
+
+def test_usage_refresh_scheduler_splits_interval_across_accounts() -> None:
+    assert refresh_scheduler_module._usage_refresh_slice_seconds(120, 4) == 30.0
+    assert refresh_scheduler_module._usage_refresh_slice_seconds(120, 240) == 0.5
+    assert refresh_scheduler_module._usage_refresh_slice_seconds(120, 0) == 120.0
+
+
+def test_usage_refresh_scheduler_rotates_one_account_per_slice() -> None:
+    scheduler = refresh_scheduler_module.UsageRefreshScheduler(interval_seconds=120, enabled=True)
+    accounts = [_make_account("acc_a", "workspace_a"), _make_account("acc_b", "workspace_b")]
+
+    first, first_cycle_complete = scheduler._select_next_account(accounts)
+    second, second_cycle_complete = scheduler._select_next_account(accounts)
+    third, third_cycle_complete = scheduler._select_next_account(accounts)
+
+    assert first is accounts[0]
+    assert first_cycle_complete is False
+    assert second is accounts[1]
+    assert second_cycle_complete is True
+    assert third is accounts[0]
+    assert third_cycle_complete is False
+
+
+def test_usage_refresh_scheduler_remaining_delay_uses_wall_clock() -> None:
+    assert refresh_scheduler_module._remaining_usage_refresh_delay(30.0, 5.0) == 25.0
+    assert refresh_scheduler_module._remaining_usage_refresh_delay(30.0, 40.0) == 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1100,6 +1140,39 @@ async def test_usage_updater_deactivates_on_401_account_deactivated_code(monkeyp
     assert update["status"] == AccountStatus.DEACTIVATED
     assert "401" in update["deactivation_reason"]
     assert "deactivated" in update["deactivation_reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_usage_updater_deactivates_on_401_app_session_terminated_code(monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_LB_USAGE_REFRESH_ENABLED", "true")
+    from app.core.clients.usage import UsageFetchError
+    from app.core.config.settings import get_settings
+
+    get_settings.cache_clear()
+
+    async def stub_fetch_usage_401_session_terminated(**_: Any) -> UsagePayload:
+        raise UsageFetchError(
+            401,
+            "Your session has ended. Please log in again.",
+            code="app_session_terminated",
+        )
+
+    monkeypatch.setattr("app.modules.usage.updater.fetch_usage", stub_fetch_usage_401_session_terminated)
+
+    usage_repo = StubUsageRepository()
+    accounts_repo = StubAccountsRepository()
+    updater = UsageUpdater(usage_repo, accounts_repo=accounts_repo)
+
+    acc = _make_account("acc_401_session_terminated", "workspace_401_session", email="ended@example.com")
+    accounts_repo.accounts_by_id[acc.id] = acc
+
+    await updater.refresh_accounts([acc], latest_usage={})
+
+    assert len(accounts_repo.status_updates) == 1
+    update = accounts_repo.status_updates[0]
+    assert update["status"] == AccountStatus.DEACTIVATED
+    assert "401" in update["deactivation_reason"]
+    assert "session has ended" in update["deactivation_reason"].lower()
 
 
 @pytest.mark.asyncio

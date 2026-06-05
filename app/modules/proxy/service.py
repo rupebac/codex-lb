@@ -141,6 +141,7 @@ from app.modules.api_keys.service import (
     ApiKeysService,
     ApiKeyUsageReservationData,
 )
+from app.modules.proxy.account_cache import is_account_routing_unavailable
 from app.modules.proxy.affinity import (
     _AffinityPolicy,
     _extract_model_class,
@@ -1800,7 +1801,7 @@ class ProxyService:
                     candidate_keys.append(alias_key)
             for candidate_key in candidate_keys:
                 session = self._http_bridge_sessions.get(candidate_key)
-                if session is None or session.closed or session.account.status != AccountStatus.ACTIVE:
+                if session is None or session.closed or not _http_bridge_session_account_active(session):
                     continue
                 if not _http_bridge_session_allows_api_key(session, api_key):
                     continue
@@ -1837,7 +1838,7 @@ class ProxyService:
                 candidate_keys.append(previous_key)
             for candidate_key in candidate_keys:
                 session = self._http_bridge_sessions.get(candidate_key)
-                if session is None or session.closed or session.account.status != AccountStatus.ACTIVE:
+                if session is None or session.closed or not _http_bridge_session_account_active(session):
                     continue
                 if not _http_bridge_session_allows_api_key(session, api_key):
                     continue
@@ -2154,6 +2155,7 @@ class ProxyService:
                         access_token,
                         account_id,
                         chatgpt_account_id=chatgpt_account_id,
+                        codex_installation_id=target.codex_installation_id,
                     )
                 finally:
                     if create_lease is not None:
@@ -5255,6 +5257,7 @@ class ProxyService:
                 access_token,
                 account_id,
                 chatgpt_account_id=chatgpt_account_id,
+                codex_installation_id=account.codex_installation_id,
             )
         finally:
             connect_lease.release()
@@ -5486,7 +5489,7 @@ class ProxyService:
                         if (
                             alias_session is None
                             or alias_session.closed
-                            or alias_session.account.status != AccountStatus.ACTIVE
+                            or not _http_bridge_session_account_active(alias_session)
                             or not _http_bridge_session_matches_preferred_account(
                                 session=alias_session,
                                 previous_response_id=previous_response_id,
@@ -5520,7 +5523,7 @@ class ProxyService:
                             if (
                                 previous_session is not None
                                 and not previous_session.closed
-                                and previous_session.account.status == AccountStatus.ACTIVE
+                                and _http_bridge_session_account_active(previous_session)
                                 and _http_bridge_session_matches_preferred_account(
                                     session=previous_session,
                                     previous_response_id=previous_response_id,
@@ -5558,7 +5561,7 @@ class ProxyService:
                 if (
                     existing is not None
                     and not existing.closed
-                    and existing.account.status == AccountStatus.ACTIVE
+                    and _http_bridge_session_account_active(existing)
                     and _http_bridge_session_allows_api_key(existing, api_key)
                     and _http_bridge_session_reusable_for_request(
                         session=existing,
@@ -5597,7 +5600,7 @@ class ProxyService:
                     existing.closed = True
                     sessions_to_close.append(existing)
                     existing = None
-                if existing is not None and not existing.closed and existing.account.status == AccountStatus.ACTIVE:
+                if existing is not None and not existing.closed:
                     old_account_id = existing.account.id
                     retiring_with_visible_requests = _http_bridge_session_retiring_with_visible_requests(existing)
                     self._http_bridge_sessions.pop(key, None)
@@ -5972,7 +5975,7 @@ class ProxyService:
                     if (
                         previous_response_id is not None
                         and inflight_future is None
-                        and (existing is None or existing.closed or existing.account.status != AccountStatus.ACTIVE)
+                        and (existing is None or existing.closed or not _http_bridge_session_account_active(existing))
                     ):
                         previous_alias_key = _http_bridge_previous_response_alias_key(previous_response_id, api_key_id)
                         previous_key = self._http_bridge_previous_response_index.get(previous_alias_key)
@@ -5981,7 +5984,7 @@ class ProxyService:
                             if (
                                 previous_session is not None
                                 and not previous_session.closed
-                                and previous_session.account.status == AccountStatus.ACTIVE
+                                and _http_bridge_session_account_active(previous_session)
                             ):
                                 key = previous_session.key
                                 existing = previous_session
@@ -6222,7 +6225,7 @@ class ProxyService:
                     continue
                 if (
                     not session.closed
-                    and session.account.status == AccountStatus.ACTIVE
+                    and _http_bridge_session_account_active(session)
                     and _http_bridge_session_allows_api_key(session, api_key)
                     and _http_bridge_session_reusable_for_request(
                         session=session,
@@ -6243,7 +6246,7 @@ class ProxyService:
                         session.request_model = request_model
                         session.last_used_at = time.monotonic()
                         return session
-                if not session.closed and session.account.status == AccountStatus.ACTIVE:
+                if not session.closed:
                     old_account_id = session.account.id
                     retiring_with_visible_requests = _http_bridge_session_retiring_with_visible_requests(session)
                     async with self._http_bridge_lock:
@@ -11107,6 +11110,7 @@ class ProxyService:
                     raise_for_status=True,
                     upstream_stream_transport_override=upstream_stream_transport,
                     chatgpt_account_id=chatgpt_account_id,
+                    codex_installation_id=account.codex_installation_id,
                 )
             else:
                 stream = core_stream_responses(
@@ -11116,6 +11120,7 @@ class ProxyService:
                     account_id,
                     raise_for_status=True,
                     chatgpt_account_id=chatgpt_account_id,
+                    codex_installation_id=account.codex_installation_id,
                 )
             iterator = stream.__aiter__()
             try:
@@ -14968,6 +14973,10 @@ def _http_bridge_session_allows_api_key(session: "_HTTPBridgeSession", api_key: 
     if api_key is None or not api_key.account_assignment_scope_enabled:
         return True
     return session.account.id in api_key.assigned_account_ids
+
+
+def _http_bridge_session_account_active(session: "_HTTPBridgeSession") -> bool:
+    return session.account.status == AccountStatus.ACTIVE and not is_account_routing_unavailable(session.account.id)
 
 
 def _http_bridge_session_reusable_for_request(

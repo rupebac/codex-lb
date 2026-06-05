@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
@@ -52,6 +53,40 @@ class _FakeConnection:
 
     async def close(self, code: int = 1000, reason: str = "") -> None:
         self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_archiving_websocket_replaces_response_create_codex_installation_id():
+    stored_installation_id = "11111111-1111-4111-8111-111111111111"
+    fake_connection = _FakeConnection()
+    websocket = proxy_websocket_module.ArchivingResponsesWebSocket(
+        proxy_websocket_module.WebsocketsResponsesWebSocket(
+            cast(proxy_websocket_module.ClientConnection, fake_connection)
+        ),
+        url="wss://chatgpt.com/backend-api/codex/responses",
+        headers={},
+        account_id="acc_1",
+        codex_installation_id=stored_installation_id,
+    )
+
+    await websocket.send_text(
+        json.dumps(
+            {
+                "type": "response.create",
+                "model": "gpt-5.1",
+                "input": "hi",
+                "client_metadata": {
+                    "x-codex-installation-id": "client-install",
+                    "x-codex-turn-metadata": '{"turn_id":"turn_1"}',
+                },
+            }
+        )
+    )
+
+    sent = json.loads(cast(str, fake_connection.sent[0]))
+    metadata = sent["client_metadata"]
+    assert metadata["x-codex-installation-id"] == stored_installation_id
+    assert metadata["x-codex-turn-metadata"] == '{"turn_id":"turn_1"}'
 
 
 async def _local_proxy_tunnel_handler(

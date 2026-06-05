@@ -23,13 +23,20 @@ export const DEFAULT_PROXY_FORM_VALUES: ProxyFormValues = {
   label: "",
 };
 
-const PROXY_URI_RE = /^(?:socks5[h]??:\/\/)?([^:@\s]+):([^@\s]*)@([^:\s]+):(\d+)$/;
+const PROXY_URI_RE =
+  /^(?:socks5h?:\/\/)?(?:(?<username>[^:@\s]+):(?<password>[^@\s]*)@)?(?<host>[^:\s]+):(?<port>\d+)$/;
 
 export function parseQuickPaste(value: string): Partial<ProxyFormValues> | null {
   const match = value.trim().match(PROXY_URI_RE);
-  if (!match) return null;
-  const [, username, password, host, port] = match;
-  return { username, password, host, portText: port };
+  if (!match?.groups) return null;
+  const { username, password, host, port } = match.groups;
+  if (!host || !port) return null;
+  return {
+    host,
+    portText: port,
+    ...(username !== undefined ? { username } : {}),
+    ...(password !== undefined ? { password } : {}),
+  };
 }
 
 export function parseProxyPort(portText: string): number {

@@ -214,6 +214,41 @@ def test_filter_inbound_headers_strips_proxy_identity_headers():
     assert filtered["Accept"] == "text/event-stream"
 
 
+def test_filter_inbound_headers_strips_codex_installation_id():
+    filtered = filter_inbound_headers(
+        {
+            "X-Codex-Installation-Id": "client-install",
+            "User-Agent": "codex-test",
+        }
+    )
+
+    assert "X-Codex-Installation-Id" not in filtered
+    assert filtered["User-Agent"] == "codex-test"
+
+
+def test_apply_codex_installation_metadata_replaces_inbound_id():
+    payload: dict[str, JsonValue] = {
+        "model": "gpt-5.1",
+        "client_metadata": {
+            "x-codex-installation-id": "client-install",
+            "x-codex-turn-metadata": '{"turn_id":"turn_1"}',
+        },
+    }
+
+    result = proxy_module.apply_codex_installation_metadata(
+        payload,
+        "11111111-1111-4111-8111-111111111111",
+    )
+
+    metadata = result["client_metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["x-codex-installation-id"] == "11111111-1111-4111-8111-111111111111"
+    assert metadata["x-codex-turn-metadata"] == '{"turn_id":"turn_1"}'
+    original_metadata = payload["client_metadata"]
+    assert isinstance(original_metadata, dict)
+    assert original_metadata["x-codex-installation-id"] == "client-install"
+
+
 def test_build_upstream_headers_overrides_auth():
     inbound = {"X-Request-Id": "req_1"}
     headers = _build_upstream_headers(inbound, "token", "acc_2")

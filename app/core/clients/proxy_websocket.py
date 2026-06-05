@@ -31,6 +31,7 @@ from app.core.clients.account_tls import cached_codex_ssl_context
 from app.core.clients.proxy import (
     FINGERPRINT_HEADER_DENY,
     ProxyResponseError,
+    apply_codex_installation_metadata,
     filter_inbound_headers,
 )
 from app.core.config.settings import get_settings
@@ -38,6 +39,7 @@ from app.core.conversation_archive import archive_bytes, archive_text
 from app.core.errors import OpenAIErrorDetail, OpenAIErrorEnvelope, openai_error
 from app.core.openai.models import OpenAIError
 from app.core.openai.parsing import parse_error_payload
+from app.core.types import JsonObject
 from app.core.utils.proxy_env import resolve_websocket_proxy_from_env
 from app.core.utils.request_id import get_request_id
 
@@ -126,13 +128,16 @@ class ArchivingResponsesWebSocket:
         url: str,
         headers: dict[str, str],
         account_id: str | None,
+        codex_installation_id: str | None = None,
     ) -> None:
         self._wrapped = wrapped
         self._url = url
         self._headers = headers
         self._account_id = account_id
+        self._codex_installation_id = codex_installation_id
 
     async def send_text(self, text: str) -> None:
+        text = _text_with_codex_installation_metadata(text, self._codex_installation_id)
         archive_text(
             direction="codex_to_server",
             kind="responses",
@@ -309,6 +314,7 @@ async def connect_responses_websocket(
     *,
     base_url: str | None = None,
     chatgpt_account_id: str | None = None,
+    codex_installation_id: str | None = None,
 ) -> UpstreamResponsesWebSocket:
     settings = get_settings()
     upstream_base = (base_url or settings.upstream_base_url).rstrip("/")
@@ -419,7 +425,25 @@ async def connect_responses_websocket(
         url=url,
         headers=upstream_headers,
         account_id=account_id,
+        codex_installation_id=codex_installation_id,
     )
+
+
+def _text_with_codex_installation_metadata(text: str, codex_installation_id: str | None) -> str:
+    if not codex_installation_id:
+        return text
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if not isinstance(parsed, dict) or not _looks_like_response_create_payload(parsed):
+        return text
+    updated = apply_codex_installation_metadata(cast(JsonObject, parsed), codex_installation_id)
+    return json.dumps(updated, ensure_ascii=True, separators=(",", ":"))
+
+
+def _looks_like_response_create_payload(payload: dict[str, object]) -> bool:
+    return payload.get("type") == "response.create" or ("model" in payload and "input" in payload)
 
 
 def _close_code_from_exception(exc: ConnectionClosedOK | ConnectionClosedError) -> int | None:

@@ -10,7 +10,6 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
-from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 from aiohttp import web
@@ -60,7 +59,7 @@ from app.modules.oauth.schemas import (
     OauthStartResponse,
     OauthStatusResponse,
 )
-from app.modules.proxy.account_cache import get_account_selection_cache
+from app.modules.proxy.account_cache import clear_account_routing_unavailable, get_account_selection_cache
 
 # Maximum time an OAuth attempt may hold acquired tokens in transient
 # state while waiting for the operator to submit proxy fields. Bounded
@@ -88,28 +87,9 @@ class OauthReauthTargetError(ValueError):
     """Raised when a targeted re-authentication account cannot be used."""
 
 
-def _oauth_redirect_uri(callback_host: str | None, *, settings: Settings | None = None) -> str:
+def _oauth_redirect_uri(_callback_host: str | None, *, settings: Settings | None = None) -> str:
     effective_settings = settings or get_settings()
-    configured = effective_settings.oauth_redirect_uri.strip()
-
-    if not callback_host:
-        return configured
-
-    parsed = urlparse(configured)
-    if not parsed.scheme or not parsed.netloc or parsed.hostname is None:
-        return configured
-
-    if ":" in callback_host:
-        netloc = callback_host
-    elif parsed.port is not None:
-        netloc = f"{callback_host}:{parsed.port}"
-    else:
-        netloc = callback_host
-
-    if parsed.hostname == callback_host:
-        return configured
-
-    return urlunparse(parsed._replace(netloc=netloc))
+    return effective_settings.oauth_redirect_uri.strip()
 
 
 @dataclass
@@ -871,12 +851,14 @@ class OauthService:
         reauth_account_id: str | None,
     ) -> None:
         if reauth_account_id is None:
-            await repo.upsert(account)
+            saved = await repo.upsert(account)
+            clear_account_routing_unavailable(saved.id)
             return
         saved = await repo.reauthenticate_account(reauth_account_id, account)
         if saved is None:
             raise OauthReauthTargetError(f"Account not found: {reauth_account_id}")
         await invalidate_account_client(saved.id)
+        clear_account_routing_unavailable(saved.id)
         get_account_selection_cache().invalidate()
 
     def _build_account_from_tokens(self, tokens: OAuthTokens) -> Account:
