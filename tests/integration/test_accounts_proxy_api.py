@@ -78,12 +78,10 @@ def _probe_session_factory_reset():
 
 
 def _scripted_probe(result: ProbeResult, captured: dict | None = None):
-    """Replace ``probe_account_proxy`` with a deterministic stub.
+    """Replace a proxy probe with a deterministic stub.
 
     The stub records the (host, port, username, password, remote_dns,
-    refresh_token) arguments into ``captured`` so tests can assert the
-    service decrypted the refresh token and reused the existing password
-    on edit.
+    refresh_token) arguments it receives into ``captured``.
     """
 
     async def _stub(
@@ -93,7 +91,8 @@ def _scripted_probe(result: ProbeResult, captured: dict | None = None):
         username,
         password,
         remote_dns,
-        refresh_token,
+        refresh_token="",
+        validate_refresh_token=True,
         settings=None,
     ):
         if captured is not None:
@@ -103,8 +102,10 @@ def _scripted_probe(result: ProbeResult, captured: dict | None = None):
                 username=username,
                 password=password,
                 remote_dns=remote_dns,
-                refresh_token=refresh_token,
+                validate_refresh_token=validate_refresh_token,
             )
+            if refresh_token:
+                captured["refresh_token"] = refresh_token
         return result
 
     return _stub
@@ -132,17 +133,18 @@ def _proxy_user_fixture() -> str:
 
 
 @pytest.mark.asyncio
-async def test_import_with_proxy_probes_before_account_becomes_visible(async_client, monkeypatch):
+async def test_import_with_proxy_connectivity_probes_before_account_becomes_visible(async_client, monkeypatch):
     from app.core.crypto import TokenEncryptor
     from app.modules.usage.updater import UsageUpdater
 
     captured: dict = {}
     usage_refresh_seen: dict = {}
     lifecycle_events: list[str] = []
+    ok_connectivity = ProbeResult(reason=ProbeReason.OK, upstream_status_code=200, checked_at=utcnow())
 
     monkeypatch.setattr(
         "app.modules.accounts.service.probe_account_proxy",
-        _scripted_probe(_ok_probe_result(), captured),
+        _scripted_probe(ok_connectivity, captured),
     )
 
     async def _capture_invalidate(account_id: str):
@@ -186,7 +188,8 @@ async def test_import_with_proxy_probes_before_account_becomes_visible(async_cli
     body = response.json()
     assert captured["host"] == "proxy.example.com"
     assert captured["password"] == _proxy_auth_fixture()
-    assert captured["refresh_token"] == "refresh"
+    assert captured["validate_refresh_token"] is False
+    assert "refresh_token" not in captured
     assert lifecycle_events == [
         f"invalidate:{body['accountId']}",
         f"usage:{body['accountId']}",
@@ -204,16 +207,16 @@ async def test_import_with_proxy_probes_before_account_becomes_visible(async_cli
         account = await repo.get_by_id(body["accountId"])
         assert account is not None
         assert account.proxy_host == "proxy.example.com"
-        assert encryptor.decrypt(account.access_token_encrypted) == "rotated-access"
-        assert encryptor.decrypt(account.refresh_token_encrypted) == "rotated-refresh"
-        assert encryptor.decrypt(account.id_token_encrypted) == "rotated-id"
+        assert encryptor.decrypt(account.access_token_encrypted) == "access"
+        assert encryptor.decrypt(account.refresh_token_encrypted) == "refresh"
 
 
 @pytest.mark.asyncio
 async def test_import_with_proxy_failure_does_not_persist_account(async_client, monkeypatch):
+    failed_connectivity = ProbeResult(reason=ProbeReason.PROXY_AUTH, detail="bad creds", checked_at=utcnow())
     monkeypatch.setattr(
         "app.modules.accounts.service.probe_account_proxy",
-        _scripted_probe(ProbeResult(reason=ProbeReason.PROXY_AUTH, detail="bad creds", checked_at=utcnow())),
+        _scripted_probe(failed_connectivity),
     )
 
     files = {
@@ -248,6 +251,54 @@ async def test_import_with_proxy_failure_does_not_persist_account(async_client, 
 
 
 @pytest.mark.asyncio
+async def test_import_with_proxy_accepts_empty_refresh_token(async_client, monkeypatch):
+    from app.core.crypto import TokenEncryptor
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        "app.modules.accounts.service.probe_account_proxy",
+        _scripted_probe(
+            ProbeResult(reason=ProbeReason.OK, upstream_status_code=404, checked_at=utcnow()),
+            captured,
+        ),
+    )
+
+    auth_json = _auth_json(
+        email="refreshless-proxy-import@example.com",
+        account_id="acc_refreshless_proxy_import",
+        refresh_token="",
+    )
+
+    response = await async_client.post(
+        "/api/accounts/import",
+        files={"auth_json": ("auth.json", json.dumps(auth_json), "application/json")},
+        data={
+            "proxyHost": "refreshless-proxy.example.com",
+            "proxyPort": "1080",
+            "proxyRemoteDns": "true",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert captured["host"] == "refreshless-proxy.example.com"
+    assert captured["validate_refresh_token"] is False
+    assert "refresh_token" not in captured
+
+    list_response = await async_client.get("/api/accounts")
+    target = next(account for account in list_response.json()["accounts"] if account["accountId"] == body["accountId"])
+    assert target["proxy"]["host"] == "refreshless-proxy.example.com"
+    assert target["auth"]["refresh"]["state"] == "missing"
+
+    encryptor = TokenEncryptor()
+    async with SessionLocal() as session:
+        repo = AccountsRepository(session)
+        account = await repo.get_by_id(body["accountId"])
+        assert account is not None
+        assert encryptor.decrypt(account.refresh_token_encrypted) == ""
+
+
+@pytest.mark.asyncio
 async def test_import_with_proxy_persists_duplicate_copy(async_client, monkeypatch):
     settings = await async_client.put(
         "/api/settings",
@@ -276,9 +327,10 @@ async def test_import_with_proxy_persists_duplicate_copy(async_client, monkeypat
     assert first.status_code == 200
 
     captured: dict = {}
+    ok_connectivity = ProbeResult(reason=ProbeReason.OK, upstream_status_code=200, checked_at=utcnow())
     monkeypatch.setattr(
         "app.modules.accounts.service.probe_account_proxy",
-        _scripted_probe(_ok_probe_result(), captured),
+        _scripted_probe(ok_connectivity, captured),
     )
 
     second = await async_client.post(
@@ -302,6 +354,7 @@ async def test_import_with_proxy_persists_duplicate_copy(async_client, monkeypat
     assert first.json()["accountId"] == base_account_id
     assert body["accountId"].startswith(f"{base_account_id}__copy")
     assert captured["host"] == "copy-proxy.example.com"
+    assert captured["validate_refresh_token"] is False
 
     list_response = await async_client.get("/api/accounts")
     target = next(account for account in list_response.json()["accounts"] if account["accountId"] == body["accountId"])
@@ -337,9 +390,10 @@ async def test_import_with_proxy_overwrites_existing_row(async_client, monkeypat
     existing_account_id = first.json()["accountId"]
 
     captured: dict = {}
+    ok_connectivity = ProbeResult(reason=ProbeReason.OK, upstream_status_code=200, checked_at=utcnow())
     monkeypatch.setattr(
         "app.modules.accounts.service.probe_account_proxy",
-        _scripted_probe(_ok_probe_result(), captured),
+        _scripted_probe(ok_connectivity, captured),
     )
 
     second = await async_client.post(
@@ -360,6 +414,7 @@ async def test_import_with_proxy_overwrites_existing_row(async_client, monkeypat
     assert second.status_code == 200, second.text
     assert second.json()["accountId"] == existing_account_id
     assert captured["host"] == "overwrite-proxy.example.com"
+    assert captured["validate_refresh_token"] is False
 
     list_response = await async_client.get("/api/accounts")
     accounts = [account for account in list_response.json()["accounts"] if account["email"] == email]
@@ -418,6 +473,54 @@ async def test_set_proxy_persists_and_summary_does_not_leak_password(async_clien
     assert proxy["host"] == "proxy.example.com"
     assert proxy["hasPassword"] is True
     assert "password" not in proxy
+
+
+@pytest.mark.asyncio
+async def test_set_proxy_for_refreshless_account_uses_connectivity_probe(async_client, monkeypatch):
+    auth_json = _auth_json(
+        email="refreshless-set-proxy@example.com",
+        account_id="acc_refreshless_set_proxy",
+        refresh_token="",
+    )
+    import_response = await async_client.post(
+        "/api/accounts/import",
+        files={"auth_json": ("auth.json", json.dumps(auth_json), "application/json")},
+    )
+    assert import_response.status_code == 200, import_response.text
+    account_id = import_response.json()["accountId"]
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        "app.modules.accounts.service.probe_account_proxy",
+        _scripted_probe(
+            ProbeResult(reason=ProbeReason.OK, upstream_status_code=404, checked_at=utcnow()),
+            captured,
+        ),
+    )
+
+    response = await async_client.post(
+        f"/api/accounts/{account_id}/proxy",
+        json={"host": "refreshless-set-proxy.example.com", "port": 1080},
+    )
+
+    assert response.status_code == 200, response.text
+    assert captured["host"] == "refreshless-set-proxy.example.com"
+    assert captured["validate_refresh_token"] is False
+    assert "refresh_token" not in captured
+
+    list_response = await async_client.get("/api/accounts")
+    target = next(account for account in list_response.json()["accounts"] if account["accountId"] == account_id)
+    assert target["proxy"]["host"] == "refreshless-set-proxy.example.com"
+    assert target["auth"]["refresh"]["state"] == "missing"
+
+    from app.core.crypto import TokenEncryptor
+
+    encryptor = TokenEncryptor()
+    async with SessionLocal() as session:
+        repo = AccountsRepository(session)
+        account = await repo.get_by_id(account_id)
+        assert account is not None
+        assert encryptor.decrypt(account.refresh_token_encrypted) == ""
 
 
 @pytest.mark.asyncio

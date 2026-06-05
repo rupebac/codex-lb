@@ -87,6 +87,8 @@ class _StubSession:
         self.closed_calls = 0
         self.posted_url: str | None = None
         self.posted_kwargs: dict[str, Any] | None = None
+        self.got_url: str | None = None
+        self.got_kwargs: dict[str, Any] | None = None
 
     async def __aenter__(self) -> "_StubSession":
         return self
@@ -103,6 +105,14 @@ class _StubSession:
         if self._exc is not None:
             raise self._exc
         assert self._response is not None  # narrow for type checkers
+        return self._response
+
+    def get(self, url: str, **kwargs: Any) -> Any:
+        self.got_url = url
+        self.got_kwargs = kwargs
+        if self._exc is not None:
+            raise self._exc
+        assert self._response is not None
         return self._response
 
 
@@ -174,6 +184,28 @@ async def test_probe_returns_upstream_status_for_4xx() -> None:
     assert result.reason is ProbeReason.UPSTREAM_STATUS
     assert result.upstream_status_code == 401
     assert "invalid_grant" in (result.detail or "")
+
+
+@pytest.mark.asyncio
+async def test_connectivity_probe_treats_upstream_response_as_ok_without_refresh_token() -> None:
+    session = _StubSession(response=_StubResponse(status=404, body="not found"))
+    async with _stub_session_factory(session):
+        result = await probe_account_proxy(
+            host="proxy.example.com",
+            port=1080,
+            username=None,
+            password=None,
+            remote_dns=True,
+            refresh_token="",
+            validate_refresh_token=False,
+        )
+
+    assert result.reason is ProbeReason.OK
+    assert result.upstream_status_code == 404
+    assert result.tokens is None
+    assert session.got_url is not None
+    assert session.got_url.endswith("auth.openai.com")
+    assert session.posted_url is None
 
 
 @pytest.mark.asyncio

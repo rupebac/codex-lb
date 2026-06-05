@@ -2,12 +2,12 @@
 
 This module performs the save-time validation of a proposed per-account
 SOCKS5 proxy configuration. It is intentionally narrow: it constructs a
-**one-shot** :class:`aiohttp_socks.ProxyConnector`, performs a real OAuth
-``refresh_token`` request against the configured ``auth_base_url`` (defaults
-to ``https://auth.openai.com``), and classifies the outcome into a typed
-:class:`ProbeResult`.
+**one-shot** :class:`aiohttp_socks.ProxyConnector` and, by default, performs a
+real OAuth ``refresh_token`` request against the configured ``auth_base_url``
+(defaults to ``https://auth.openai.com``). Auth.json import disables
+refresh-token validation and performs a connectivity-only HTTPS request.
 
-Why a real refresh and not a lightweight HEAD?
+Why a real refresh by default and not a lightweight HEAD?
 
 - We want to surface authentication regressions (e.g. revoked refresh
   tokens) BEFORE we let the operator save a proxy that will then immediately
@@ -204,11 +204,12 @@ async def build_account_proxy_session(
     remote_dns: bool,
     timeout_seconds: float,
 ) -> aiohttp.ClientSession:
-    """Build a one-shot SOCKS5-backed session for pre-persistence OAuth calls.
+    """Build a one-shot SOCKS5-backed session for pre-persistence probes.
 
     OAuth add-account flows that are started with a proxy need to route their
     server-side OAuth bootstrap/token-exchange calls through that proxy before
-    an account row exists. Codex is the only active TLS profile, so the
+    an account row exists. Proxy connectivity probes also reuse this session
+    builder. Codex is the only active TLS profile, so the
     upstream-TLS hop always uses the singleton codex SSL context.
     """
 
@@ -223,7 +224,7 @@ async def build_account_proxy_session(
 
 
 def proxy_probe_error_from_exception(exc: BaseException) -> ProxyProbeError | None:
-    """Map transport exceptions from a SOCKS5-backed OAuth call to probe errors."""
+    """Map transport exceptions from a SOCKS5-backed probe to probe errors."""
 
     if isinstance(exc, _PROXY_TIMEOUT_ERRORS):
         return ProxyProbeError(ProbeReason.TIMEOUT, _short_detail(exc))
@@ -255,18 +256,23 @@ async def probe_account_proxy(
     password: str | None,
     remote_dns: bool,
     refresh_token: str,
+    validate_refresh_token: bool = True,
     settings: Settings | None = None,
 ) -> ProbeResult:
-    """Run the end-to-end SOCKS5 + OAuth refresh probe.
+    """Run the save-time SOCKS5 proxy probe.
 
     Returns a :class:`ProbeResult` reflecting the classified outcome. Never
     raises :class:`ProxyProbeError` — that mapping is the API layer's job.
+
+    By default the probe performs a real OAuth refresh. Imports pass
+    ``validate_refresh_token=False`` so proxy validation proves HTTPS egress
+    without sending imported refresh-token material upstream.
     """
 
     effective_settings = settings or get_settings()
     timeout_seconds = float(effective_settings.account_proxy_probe_timeout_seconds)
     auth_base_url = effective_settings.auth_base_url.rstrip("/")
-    url = f"{auth_base_url}/oauth/token"
+    url = f"{auth_base_url}/oauth/token" if validate_refresh_token else auth_base_url
 
     connection = AccountProxyConnection(
         host=host,
@@ -275,16 +281,18 @@ async def probe_account_proxy(
         password=password,
         remote_dns=bool(remote_dns),
     )
-    payload = {
-        "grant_type": "refresh_token",
-        "client_id": effective_settings.oauth_client_id,
-        "refresh_token": refresh_token,
-        "scope": effective_settings.oauth_scope,
-    }
+    payload: dict[str, str] | None = None
     headers: dict[str, str] = {}
-    request_id = get_request_id()
-    if request_id:
-        headers["x-request-id"] = request_id
+    if validate_refresh_token:
+        payload = {
+            "grant_type": "refresh_token",
+            "client_id": effective_settings.oauth_client_id,
+            "refresh_token": refresh_token,
+            "scope": effective_settings.oauth_scope,
+        }
+        request_id = get_request_id()
+        if request_id:
+            headers["x-request-id"] = request_id
 
     started_at = utcnow()
     try:
@@ -317,6 +325,18 @@ async def probe_account_proxy(
     try:
         async with session:
             try:
+                if not validate_refresh_token:
+                    async with session.get(
+                        url,
+                        allow_redirects=False,
+                        timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                    ) as resp:
+                        return ProbeResult(
+                            reason=ProbeReason.OK,
+                            upstream_status_code=resp.status,
+                            checked_at=utcnow(),
+                        )
+                assert payload is not None
                 async with session.post(
                     url,
                     json=payload,

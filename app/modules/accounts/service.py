@@ -276,6 +276,7 @@ class AccountsService:
             account,
             proxy_payload=proxy_payload,
             refresh_token=auth.tokens.refresh_token,
+            validate_refresh_token=False,
         )
         return AccountImportResponse(
             account_id=saved.id,
@@ -290,16 +291,16 @@ class AccountsService:
         *,
         proxy_payload: AccountProxyInput | None,
         refresh_token: str,
+        validate_refresh_token: bool = True,
         before_upsert: Callable[[], Awaitable[None]] | None = None,
     ) -> Account:
         """Atomically probe optional proxy, persist account, refresh caches.
 
-        Shared by the import and OAuth add-account flows so the
+        Shared by import and OAuth add-account flows so the
         probe / upsert / invalidate / usage-refresh sequence does not
         drift between them. The caller MUST have already populated
         ``account`` with identity + (encrypted) token fields; the
-        plaintext ``refresh_token`` is only needed to drive the proxy
-        probe when ``proxy_payload`` is provided.
+        plaintext ``refresh_token`` drives refresh-backed proxy probes.
         """
 
         if proxy_payload is not None:
@@ -309,6 +310,7 @@ class AccountsService:
             await self._probe_and_apply_proxy_payload(
                 account,
                 refresh_token=refresh_token,
+                validate_refresh_token=validate_refresh_token,
                 proxy_payload=proxy_payload,
             )
 
@@ -373,16 +375,20 @@ class AccountsService:
         account: Account,
         *,
         refresh_token: str,
+        validate_refresh_token: bool = True,
         proxy_payload: AccountProxyInput,
     ) -> None:
-        result, rotated_tokens = await self._probe_proxy_payload(
-            refresh_token=refresh_token,
-            payload=proxy_payload,
-        )
-        account.access_token_encrypted = rotated_tokens.access_token_encrypted
-        account.refresh_token_encrypted = rotated_tokens.refresh_token_encrypted
-        account.id_token_encrypted = rotated_tokens.id_token_encrypted
-        account.last_refresh = rotated_tokens.last_refresh
+        if validate_refresh_token:
+            result, rotated_tokens = await self._probe_proxy_payload(
+                refresh_token=refresh_token,
+                payload=proxy_payload,
+            )
+            account.access_token_encrypted = rotated_tokens.access_token_encrypted
+            account.refresh_token_encrypted = rotated_tokens.refresh_token_encrypted
+            account.id_token_encrypted = rotated_tokens.id_token_encrypted
+            account.last_refresh = rotated_tokens.last_refresh
+        else:
+            result = await self._probe_proxy_connectivity_payload(proxy_payload)
         account.proxy_host = proxy_payload.host
         account.proxy_port = proxy_payload.port
         account.proxy_username = proxy_payload.username
@@ -541,18 +547,19 @@ class AccountsService:
             # envelope so the dashboard can render an actionable
             # message instead of a raw 500.
             raise AccountCredentialsUnrecoverableError(account_id) from exc
-        result, rotated_tokens = await self._probe_proxy_payload(
-            refresh_token=refresh_token,
-            payload=payload,
-            password_plain=password_plain,
-        )
+        if refresh_token:
+            result, rotated_tokens = await self._probe_proxy_payload(
+                refresh_token=refresh_token,
+                payload=payload,
+                password_plain=password_plain,
+            )
+        else:
+            result = await self._probe_proxy_connectivity_payload(payload, password_plain=password_plain)
+            rotated_tokens = None
 
-        # Refresh-token rotation safety. The probe just performed a real
-        # OAuth refresh through the proposed proxy; if the upstream
-        # rotated the refresh token, the response payload contains the
-        # new tokens. We MUST persist them atomically with the proxy
-        # config — otherwise the previously stored refresh token is now
-        # stale and the next real refresh will fail with ``invalid_grant``.
+        # Refresh-token rotation safety. When a refresh-backed probe ran,
+        # persist returned tokens atomically with the proxy config; otherwise
+        # refreshless connectivity probes leave imported token material intact.
         password_encrypted = self._encryptor.encrypt(password_plain) if password_plain is not None else None
         updated = await self._repo.update_proxy(
             account_id,
@@ -621,6 +628,26 @@ class AccountsService:
             id_token_encrypted=self._encryptor.encrypt(tokens.id_token),
             last_refresh=utcnow(),
         )
+
+    async def _probe_proxy_connectivity_payload(
+        self,
+        payload: AccountProxyInput,
+        *,
+        password_plain: str | None | object = _PASSWORD_UNSET,
+    ) -> ProbeResult:
+        probe_password = payload.password if password_plain is _PASSWORD_UNSET else cast(str | None, password_plain)
+        result: ProbeResult = await probe_account_proxy(
+            host=payload.host,
+            port=payload.port,
+            username=payload.username,
+            password=probe_password,
+            remote_dns=payload.remote_dns,
+            refresh_token="",
+            validate_refresh_token=False,
+        )
+        if not result.ok:
+            raise ProxyProbeError(result.reason, result.detail)
+        return result
 
     async def clear_account_proxy(self, account_id: str) -> bool:
         """Remove the proxy configuration on an account (idempotent for empty).
