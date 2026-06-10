@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 
 from app.core.clients.proxy import (
+    CODEX_INSTALLATION_ID_HEADER,
     ImageFetchSession,
     ProxyResponseError,
     _inline_content_images,
@@ -721,12 +722,13 @@ def _response_create_client_metadata(
     payload: Mapping[str, JsonValue],
     *,
     headers: Mapping[str, str],
+    codex_installation_id: str | None = None,
 ) -> Mapping[str, JsonValue] | None:
     raw_value = payload.get("client_metadata")
     client_metadata: dict[str, JsonValue] = {}
     if is_json_mapping(raw_value):
         for key, value in raw_value.items():
-            if isinstance(key, str):
+            if isinstance(key, str) and key.lower() != CODEX_INSTALLATION_ID_HEADER:
                 client_metadata[key] = value
 
     normalized_headers = {key.lower(): value for key, value in headers.items()}
@@ -734,4 +736,6 @@ def _response_create_client_metadata(
     if isinstance(turn_metadata, str) and turn_metadata.strip():
         client_metadata.setdefault("x-codex-turn-metadata", turn_metadata)
 
+    if codex_installation_id:
+        client_metadata[CODEX_INSTALLATION_ID_HEADER] = codex_installation_id
     return client_metadata or None
