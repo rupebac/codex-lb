@@ -14,7 +14,6 @@ down_revision = (
     "20260515_000000_add_prefer_earlier_reset_window",
     "20260515_020000_add_split_sticky_budget_thresholds",
     "20260520_030000_add_quota_planner",
-    "20260521_000000_add_account_security_work_authorized",
     "20260531_000000_add_accounts_codex_installation_id",
     "20260531_000000_add_single_account_routing",
     "20260603_000000_add_weekly_pace_working_days",

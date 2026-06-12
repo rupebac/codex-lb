@@ -179,6 +179,22 @@ class Settings(BaseSettings):
     oauth_callback_host: str = _default_oauth_callback_host()
     oauth_callback_port: int = 1455  # Do not change the port. OpenAI dislikes changes.
     token_refresh_timeout_seconds: float = 8.0
+    account_token_refresh_jitter_hours: float = Field(
+        default=18.0,
+        ge=0.0,
+        # Upper bound: half the default refresh interval expressed in
+        # hours (8 days * 24 / 2 = 96h). Jitter is an early-refresh
+        # offset, so this cap keeps the default schedule from starting
+        # earlier than halfway through the interval. Operators running
+        # custom ``token_refresh_interval_days`` values should adjust
+        # accordingly.
+        le=96.0,
+    )
+    account_proxy_probe_timeout_seconds: float = Field(default=10.0, gt=0)
+    account_proxy_failure_threshold: int = Field(default=3, ge=1)
+    account_proxy_failure_window_seconds: float = Field(default=60.0, gt=0)
+    http_connector_limit_per_account_direct: int = Field(default=20, ge=1)
+    http_connector_limit_per_host_per_account_direct: int = Field(default=10, ge=1)
     auth_guardian_enabled: bool = False
     auth_guardian_interval_seconds: int = Field(default=21600, gt=0)
     auth_guardian_max_refresh_age_seconds: int = Field(default=43200, gt=0)
@@ -241,7 +257,7 @@ class Settings(BaseSettings):
     # cap is lifted in the same change that introduces fan-out.
     model_registry_enabled: bool = True
     model_registry_refresh_interval_seconds: int = Field(default=300, gt=0)
-    model_registry_client_version: str = "0.101.0"
+    model_registry_client_version: str = "0.139.0"
     model_context_window_overrides: Annotated[dict[str, int], NoDecode] = Field(default_factory=dict)
     proxy_unauthenticated_client_cidrs: Annotated[list[str], NoDecode] = Field(default_factory=list)
     firewall_trust_proxy_headers: bool = False
@@ -263,6 +279,7 @@ class Settings(BaseSettings):
 
     # Logging
     log_format: str = "text"  # "text" or "json"
+    log_level: str = "INFO"
 
     # Leader election
     leader_election_enabled: bool = False

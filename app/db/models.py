@@ -110,12 +110,6 @@ class Account(Base):
         server_default=false(),
         nullable=False,
     )
-    security_work_authorized: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        server_default=false(),
-        nullable=False,
-    )
     proxy_host: Mapped[str | None] = mapped_column(String, nullable=True)
     proxy_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     proxy_username: Mapped[str | None] = mapped_column(String, nullable=True)
