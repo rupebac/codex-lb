@@ -267,11 +267,45 @@ def _ensure_responses_websocket_beta_header(headers: dict[str, str]) -> None:
 
 def _pop_header_case_insensitive(headers: dict[str, str], name: str) -> str | None:
     lowered = name.lower()
+    value: str | None = None
     for key in tuple(headers):
         if key.lower() != lowered:
             continue
-        return headers.pop(key)
-    return None
+        popped = headers.pop(key)
+        if value is None:
+            value = popped
+    return value
+
+
+def _pop_header_as(
+    headers: dict[str, str],
+    output: dict[str, str],
+    *,
+    name: str,
+    output_name: str,
+) -> None:
+    value = _pop_header_case_insensitive(headers, name)
+    if value is not None:
+        output[output_name] = value
+
+
+def _websocket_connect_headers(
+    headers: dict[str, str],
+    *,
+    origin: Origin | None,
+    user_agent: str | None,
+) -> dict[str, str] | None:
+    connect_headers: dict[str, str] = {}
+    if origin is not None:
+        connect_headers["Origin"] = str(origin)
+    if user_agent is not None:
+        connect_headers["user-agent"] = user_agent
+    _pop_header_as(headers, connect_headers, name="originator", output_name="originator")
+    _pop_header_as(headers, connect_headers, name="chatgpt-account-id", output_name="chatgpt-account-id")
+    _pop_header_as(headers, connect_headers, name="openai-beta", output_name="openai-beta")
+    _pop_header_as(headers, connect_headers, name="authorization", output_name="authorization")
+    connect_headers.update(headers)
+    return connect_headers or None
 
 
 def _responses_websocket_url(base_url: str) -> str:
@@ -327,6 +361,7 @@ async def connect_responses_websocket(
     )
     origin = cast(Origin | None, _pop_header_case_insensitive(upstream_headers, "origin"))
     user_agent = _pop_header_case_insensitive(upstream_headers, "user-agent")
+    connect_headers = _websocket_connect_headers(dict(upstream_headers), origin=origin, user_agent=user_agent)
     # An explicit per-account SOCKS5 proxy MUST take precedence over the env-
     # based default (``upstream_websocket_trust_env``); when no per-account
     # proxy is configured we fall back to the existing env-based behaviour.
@@ -348,11 +383,12 @@ async def connect_responses_websocket(
     else:
         ssl_ctx = ssl.create_default_context()
     connect_kwargs: dict[str, Any] = {
-        "origin": origin,
-        "additional_headers": upstream_headers or None,
-        "user_agent_header": user_agent,
+        "origin": None,
+        "additional_headers": connect_headers,
+        "user_agent_header": None,
         "proxy": proxy_arg,
         "open_timeout": settings.upstream_connect_timeout_seconds,
+        "compression": None,
         # Long Codex turns can spend minutes in upstream reasoning without
         # sending application frames. Keep transport pings enabled so
         # intermediaries still see liveness, but disable the library's pong

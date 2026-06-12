@@ -32,20 +32,25 @@ def test_codex_context_uses_openssl_default_cipher_list() -> None:
     assert codex_names == bare_names
 
 
-def test_codex_context_sets_http1_alpn_only() -> None:
-    """ALPN is set to ``["http/1.1"]`` because aiohttp does not speak
-    HTTP/2. Advertising h2 caused some SOCKS5 proxies to negotiate a
-    protocol this process cannot use.
+def test_codex_context_does_not_force_alpn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Codex TLS profile MUST NOT mutate ALPN.
+
+    Codex CLI's Linux reqwest/default-tls shape was measured without an
+    ALPN extension. Forcing ``["http/1.1"]`` changes both JA3 and JA4.
     """
 
+    calls: list[list[str]] = []
+    original = ssl.SSLContext.set_alpn_protocols
+
+    def spy(self: ssl.SSLContext, protocols: list[str]) -> None:
+        calls.append(protocols)
+        original(self, protocols)
+
+    monkeypatch.setattr(ssl.SSLContext, "set_alpn_protocols", spy)
     codex = build_codex_ssl_context()
-    # ssl.SSLContext doesn't expose ALPN protocols directly; the
-    # invariant is "no exception raised at build time" plus the
-    # behavioural side-effect, which we verify via the cached helper
-    # below by re-building and comparing identity.
-    # The build call returning a context without raising is the
-    # functional contract.
+
     assert isinstance(codex, ssl.SSLContext)
+    assert calls == []
 
 
 def test_cached_codex_context_is_singleton() -> None:

@@ -167,6 +167,7 @@ async def test_connect_responses_websocket_uses_websockets_transport(monkeypatch
             "session_id": "session-1",
             "User-Agent": "Codex CLI Test",
             "Origin": "https://chatgpt.com",
+            "originator": "codex_cli_rs",
             "Cookie": "dashboard_session=secret",
         },
         "access-token",
@@ -178,21 +179,33 @@ async def test_connect_responses_websocket_uses_websockets_transport(monkeypatch
     assert fake_connection.sent == ["hello"]
     assert seen["url"] == "wss://chatgpt.com/backend-api/codex/responses"
     kwargs = cast(dict[str, object], seen["kwargs"])
-    assert kwargs["origin"] == "https://chatgpt.com"
-    assert kwargs["user_agent_header"] == "Codex CLI Test"
+    assert kwargs["origin"] is None
+    assert kwargs["user_agent_header"] is None
     assert kwargs["proxy"] is None
     assert kwargs["open_timeout"] == 7.0
+    assert kwargs["compression"] is None
     assert "ping_interval" not in kwargs
     assert kwargs["ping_timeout"] is None
     assert kwargs["max_size"] == 4321
     additional_headers = cast(dict[str, str], kwargs["additional_headers"])
-    assert additional_headers["Authorization"] == "Bearer access-token"
+    assert list(additional_headers)[:6] == [
+        "Origin",
+        "user-agent",
+        "originator",
+        "chatgpt-account-id",
+        "openai-beta",
+        "authorization",
+    ]
+    assert additional_headers["Origin"] == "https://chatgpt.com"
+    assert additional_headers["user-agent"] == "Codex CLI Test"
+    assert additional_headers["originator"] == "codex_cli_rs"
+    assert additional_headers["authorization"] == "Bearer access-token"
     assert additional_headers["chatgpt-account-id"] == "account-123"
     assert additional_headers["openai-beta"] == "responses_websockets=2026-02-06"
     assert additional_headers["session_id"] == "session-1"
     assert "Cookie" not in additional_headers
     assert "User-Agent" not in additional_headers
-    assert "Origin" not in additional_headers
+    assert "Authorization" not in additional_headers
 
 
 @pytest.mark.asyncio
@@ -396,7 +409,53 @@ async def test_connect_responses_websocket_appends_required_beta_header(monkeypa
 
     kwargs = cast(dict[str, object], seen["kwargs"])
     additional_headers = cast(dict[str, str], kwargs["additional_headers"])
-    assert additional_headers["OpenAI-Beta"] == "assistants=v2, responses_websockets=2026-02-06"
+    assert additional_headers["openai-beta"] == "assistants=v2, responses_websockets=2026-02-06"
+
+
+@pytest.mark.asyncio
+async def test_connect_responses_websocket_normalizes_duplicate_persona_header_casing(monkeypatch):
+    fake_connection = _FakeConnection()
+    seen: dict[str, object] = {}
+
+    async def fake_websocket_connect(url: str, **kwargs):
+        seen["url"] = url
+        seen["kwargs"] = kwargs
+        return fake_connection
+
+    monkeypatch.setattr(proxy_websocket_module, "get_http_client", lambda: _UnexpectedHttpClient(), raising=False)
+    monkeypatch.setattr(proxy_websocket_module, "websocket_connect", fake_websocket_connect, raising=False)
+    monkeypatch.setattr(
+        proxy_websocket_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            upstream_base_url="https://chatgpt.com/backend-api",
+            upstream_connect_timeout_seconds=7.0,
+            max_sse_event_bytes=4321,
+            upstream_websocket_trust_env=False,
+        ),
+    )
+
+    await connect_responses_websocket(
+        {
+            "User-Agent": "Codex CLI Test",
+            "user-agent": "duplicate-test",
+            "Authorization": "Bearer inbound",
+            "authorization": "Bearer duplicate",
+            "OpenAI-Beta": "assistants=v2",
+            "openai-beta": "duplicate=v1",
+        },
+        "access-token",
+        "account-123",
+    )
+
+    kwargs = cast(dict[str, object], seen["kwargs"])
+    additional_headers = cast(dict[str, str], kwargs["additional_headers"])
+    assert additional_headers["user-agent"] == "Codex CLI Test"
+    assert additional_headers["authorization"] == "Bearer access-token"
+    assert additional_headers["openai-beta"] == "assistants=v2, responses_websockets=2026-02-06"
+    assert not any(key for key in additional_headers if key.lower() == "user-agent" and key != "user-agent")
+    assert not any(key for key in additional_headers if key.lower() == "authorization" and key != "authorization")
+    assert not any(key for key in additional_headers if key.lower() == "openai-beta" and key != "openai-beta")
 
 
 @pytest.mark.asyncio
