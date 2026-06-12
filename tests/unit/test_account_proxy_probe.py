@@ -17,7 +17,7 @@ import struct
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import aiohttp
 import pytest
@@ -548,7 +548,29 @@ def test_set_session_factory_for_test_is_idempotent_reset() -> None:
     probe_module._set_session_factory_for_test(None)
 
 
-def test_unused_patch_import_is_kept_for_future_use() -> None:
-    # Keep ``patch`` referenced so the (currently) unused import is not
-    # flagged. Future tests may want to swap individual functions.
-    assert patch is not None
+@pytest.mark.asyncio
+async def test_build_probe_session_sets_codex_cli_identity_headers() -> None:
+    connection = probe_module.AccountProxyConnection(
+        host="proxy.example.com",
+        port=1080,
+        username=None,
+        password=None,
+        remote_dns=True,
+    )
+    session = MagicMock()
+    settings = SimpleNamespace(model_registry_client_version="0.139.0")
+
+    probe_module._set_session_factory_for_test(None)
+    with (
+        patch("app.core.clients.account_tls.cached_codex_ssl_context", return_value=object()),
+        patch("app.core.clients.account_proxy_probe.ProxyConnector"),
+        patch("app.core.clients.account_proxy_probe.get_settings", return_value=settings),
+        patch("app.core.clients.account_proxy_probe.aiohttp.ClientSession", return_value=session) as session_cls,
+    ):
+        built = await probe_module._build_probe_session(connection, 1.0)
+
+    assert built is session
+    headers = session_cls.call_args.kwargs["headers"]
+    assert headers["originator"] == "codex_cli_rs"
+    assert headers["User-Agent"].startswith("codex_cli_rs/0.139.0 ")
+    assert "aiohttp" not in headers["User-Agent"]

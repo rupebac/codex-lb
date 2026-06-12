@@ -7,6 +7,7 @@ import time
 import aiohttp
 import anyio
 
+from app.core.clients.user_agent import codex_cli_default_headers
 from app.core.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -64,9 +65,14 @@ class CodexVersionCache:
             self._cached_at = 0.0
 
     async def _fetch_latest_version(self) -> str | None:
+        settings = get_settings()
         timeout = aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_SECONDS)
         try:
-            async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+            async with aiohttp.ClientSession(
+                timeout=timeout,
+                headers=codex_cli_default_headers(version=settings.model_registry_client_version),
+                trust_env=True,
+            ) as session:
                 version = await self._fetch_from_github(session)
                 if version is not None:
                     return version

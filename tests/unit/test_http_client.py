@@ -16,6 +16,7 @@ def _settings() -> SimpleNamespace:
         http_connector_limit=100,
         http_connector_limit_per_host=50,
         upstream_websocket_trust_env=False,
+        model_registry_client_version="0.139.0",
     )
 
 
@@ -50,6 +51,11 @@ async def test_init_http_client_uses_separate_http_and_websocket_sessions() -> N
     assert client.retry_client is retry_client
     assert client_session_cls.call_args_list[0].kwargs["trust_env"] is True
     assert client_session_cls.call_args_list[1].kwargs["trust_env"] is False
+    for call in client_session_cls.call_args_list:
+        headers = call.kwargs["headers"]
+        assert headers["originator"] == "codex_cli_rs"
+        assert headers["User-Agent"].startswith("codex_cli_rs/0.139.0 ")
+        assert "aiohttp" not in headers["User-Agent"]
     retry_client_cls.assert_called_once_with(client_session=http_session, raise_for_status=False)
 
     await http_module.close_http_client()

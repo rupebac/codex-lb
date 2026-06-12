@@ -30,7 +30,7 @@ async def test_runtime_version_reports_update_available_for_newer_github_release
     service = RuntimeVersionService(current_version="1.19.0", ttl_seconds=60)
     session = _mock_session(_mock_response(json_data={"tag_name": "v1.20.0"}))
 
-    with patch("app.modules.runtime.service.aiohttp.ClientSession", return_value=session):
+    with patch("app.modules.runtime.service.aiohttp.ClientSession", return_value=session) as session_cls:
         status = await service.get_version_status()
 
     assert status.current_version == "1.19.0"
@@ -38,6 +38,10 @@ async def test_runtime_version_reports_update_available_for_newer_github_release
     assert status.update_available is True
     assert status.source == "github"
     assert status.release_url == "https://github.com/Soju06/codex-lb/releases/latest"
+    headers = session_cls.call_args.kwargs["headers"]
+    assert headers["originator"] == "codex_cli_rs"
+    assert headers["User-Agent"].startswith("codex_cli_rs/0.139.0 ")
+    assert "aiohttp" not in headers["User-Agent"]
 
 
 @pytest.mark.asyncio

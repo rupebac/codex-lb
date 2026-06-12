@@ -11,6 +11,8 @@ from datetime import datetime
 import aiohttp
 
 from app import __version__
+from app.core.clients.user_agent import codex_cli_default_headers
+from app.core.config.settings import get_settings
 from app.core.utils.time import utcnow
 from app.modules.runtime.schemas import RuntimeVersionResponse
 
@@ -94,15 +96,19 @@ class RuntimeVersionService:
         )
 
     async def _fetch_latest_release_version(self) -> str:
+        settings = get_settings()
         timeout = aiohttp.ClientTimeout(total=10, sock_connect=5, sock_read=5)
         headers = {
             "Accept": "application/vnd.github+json",
-            "User-Agent": f"codex-lb/{self._current_version}",
         }
         github_token = os.getenv(self._github_token_env_var, "").strip()
         if github_token:
             headers["Authorization"] = f"Bearer {github_token}"
-        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+        async with aiohttp.ClientSession(
+            timeout=timeout,
+            headers=codex_cli_default_headers(version=settings.model_registry_client_version),
+            trust_env=True,
+        ) as session:
             async with session.get(_GITHUB_LATEST_RELEASE_URL, headers=headers) as response:
                 if response.status != 200:
                     raise RuntimeError(f"GitHub releases API returned HTTP {response.status}")

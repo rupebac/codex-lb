@@ -12,6 +12,7 @@ from typing import cast
 import aiohttp
 
 from app.core.clients.proxy import ProxyResponseError
+from app.core.clients.user_agent import codex_cli_default_headers
 from app.core.config.settings import get_settings
 from app.core.crypto import get_or_create_key
 from app.core.errors import OpenAIErrorEnvelope, openai_error, response_failed_event
@@ -84,7 +85,11 @@ class HTTPBridgeOwnerClient:
             connect_timeout_seconds=settings.upstream_connect_timeout_seconds,
             idle_timeout_seconds=settings.stream_idle_timeout_seconds,
         )
-        async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
+        async with aiohttp.ClientSession(
+            timeout=timeout,
+            headers=codex_cli_default_headers(version=settings.model_registry_client_version),
+            trust_env=False,
+        ) as session:
             async with session.post(
                 f"{owner_endpoint}{HTTP_BRIDGE_INTERNAL_FORWARD_PATH}",
                 json=payload.model_dump(mode="json", exclude_none=True),

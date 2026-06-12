@@ -50,6 +50,7 @@ from python_socks._errors import (
 
 from app.core.auth.models import OAuthTokenPayload
 from app.core.clients.account_http import AccountProxyConnection
+from app.core.clients.user_agent import codex_cli_default_headers
 from app.core.config.settings import Settings, get_settings
 from app.core.utils.request_id import get_request_id
 from app.core.utils.time import utcnow
@@ -186,9 +187,11 @@ async def _build_probe_session(
         connector_kwargs["ssl"] = ssl_ctx
     connector = ProxyConnector(**connector_kwargs)
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+    settings = get_settings()
     return aiohttp.ClientSession(
         connector=connector,
         timeout=timeout,
+        headers=codex_cli_default_headers(version=settings.model_registry_client_version),
         # Ignore environment proxies — the probe MUST exercise the explicit
         # SOCKS5 connector, not whatever HTTP_PROXY is set to.
         trust_env=False,

@@ -13,6 +13,7 @@ import aiohttp
 import certifi
 from aiohttp_retry import RetryClient
 
+from app.core.clients.user_agent import codex_cli_default_headers
 from app.core.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,7 @@ class HttpClientLease:
 
 async def _build_http_client() -> HttpClient:
     settings = get_settings()
+    default_headers = codex_cli_default_headers(version=settings.model_registry_client_version)
     connector = aiohttp.TCPConnector(
         limit=settings.http_connector_limit,
         limit_per_host=settings.http_connector_limit_per_host,
@@ -97,6 +99,7 @@ async def _build_http_client() -> HttpClient:
     session = aiohttp.ClientSession(
         connector=connector,
         timeout=aiohttp.ClientTimeout(total=None),
+        headers=default_headers,
         trust_env=True,
     )
     try:
@@ -105,6 +108,7 @@ async def _build_http_client() -> HttpClient:
         websocket_session = aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=_build_ssl_context()),
             timeout=aiohttp.ClientTimeout(total=None),
+            headers=default_headers,
             trust_env=settings.upstream_websocket_trust_env,
         )
     except Exception:

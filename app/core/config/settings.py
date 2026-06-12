@@ -247,7 +247,7 @@ class Settings(BaseSettings):
     # cap is lifted in the same change that introduces fan-out.
     model_registry_enabled: bool = True
     model_registry_refresh_interval_seconds: int = Field(default=300, gt=0)
-    model_registry_client_version: str = "0.101.0"
+    model_registry_client_version: str = "0.139.0"
     model_context_window_overrides: Annotated[dict[str, int], NoDecode] = Field(default_factory=dict)
     proxy_unauthenticated_client_cidrs: Annotated[list[str], NoDecode] = Field(default_factory=list)
     firewall_trust_proxy_headers: bool = False

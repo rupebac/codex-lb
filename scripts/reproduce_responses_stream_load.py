@@ -22,6 +22,8 @@ from typing import Final
 
 import aiohttp
 
+from app.core.clients.user_agent import codex_cli_default_headers
+
 DEFAULT_MODEL: Final[str] = "gpt-5.3-codex"
 
 
@@ -53,7 +55,7 @@ async def _run_worker(
         "Accept": "text/event-stream",
     }
     timeout = aiohttp.ClientTimeout(total=None, sock_connect=30)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    async with aiohttp.ClientSession(timeout=timeout, headers=codex_cli_default_headers()) as session:
         while time.monotonic() < deadline:
             stats.requests += 1
             payload = {

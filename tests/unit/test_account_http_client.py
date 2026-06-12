@@ -39,6 +39,7 @@ def _settings() -> SimpleNamespace:
         http_connector_limit_per_account_direct=20,
         http_connector_limit_per_host_per_account_direct=10,
         upstream_websocket_trust_env=False,
+        model_registry_client_version="0.139.0",
     )
 
 
@@ -172,6 +173,11 @@ async def test_no_proxy_account_gets_dedicated_direct_session() -> None:
         # ``trust_env=True`` keeps env-proxy parity with the previous
         # global-client behavior for direct accounts.
         assert session_cls.call_args_list[0].kwargs["trust_env"] is True
+        for call in session_cls.call_args_list:
+            headers = call.kwargs["headers"]
+            assert headers["originator"] == "codex_cli_rs"
+            assert headers["User-Agent"].startswith("codex_cli_rs/0.139.0 ")
+            assert "aiohttp" not in headers["User-Agent"]
 
     managed = account_http_module._running_managed_clients_for_test()
     assert len(managed) == 1
@@ -401,6 +407,10 @@ async def test_proxy_session_built_with_trust_env_false() -> None:
 
     for call in client_session_cls.call_args_list:
         assert call.kwargs["trust_env"] is False
+        headers = call.kwargs["headers"]
+        assert headers["originator"] == "codex_cli_rs"
+        assert headers["User-Agent"].startswith("codex_cli_rs/0.139.0 ")
+        assert "aiohttp" not in headers["User-Agent"]
 
 
 @pytest.mark.asyncio

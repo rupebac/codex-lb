@@ -293,8 +293,15 @@ async def test_owner_forward_uses_direct_session_without_env_proxy(monkeypatch: 
             return SimpleNamespace(iter_chunked=_iter_chunked)
 
     class FakeSession:
-        def __init__(self, *, timeout: aiohttp.ClientTimeout, trust_env: bool) -> None:
+        def __init__(
+            self,
+            *,
+            timeout: aiohttp.ClientTimeout,
+            headers: dict[str, str],
+            trust_env: bool,
+        ) -> None:
             captured["timeout"] = timeout
+            captured["session_headers"] = headers
             captured["trust_env"] = trust_env
 
         async def __aenter__(self) -> "FakeSession":
@@ -338,3 +345,7 @@ async def test_owner_forward_uses_direct_session_without_env_proxy(monkeypatch: 
     assert '"type":"response.failed"' in events[0]
     assert '"code":"stream_incomplete"' in events[0]
     assert captured["trust_env"] is False
+    session_headers = captured["session_headers"]
+    assert session_headers["originator"] == "codex_cli_rs"
+    assert session_headers["User-Agent"].startswith("codex_cli_rs/0.139.0 ")
+    assert "aiohttp" not in session_headers["User-Agent"]

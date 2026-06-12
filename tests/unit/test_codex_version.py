@@ -52,6 +52,10 @@ async def test_fetches_version_from_github():
 
     assert version == "1.2.3"
     assert client_session_cls.call_args.kwargs["trust_env"] is True
+    headers = client_session_cls.call_args.kwargs["headers"]
+    assert headers["originator"] == "codex_cli_rs"
+    assert headers["User-Agent"].startswith("codex_cli_rs/0.139.0 ")
+    assert "aiohttp" not in headers["User-Agent"]
 
 
 @pytest.mark.asyncio
@@ -100,7 +104,7 @@ async def test_rejects_invalid_version_name():
         version = await cache.get_version()
 
     # Invalid name falls back to settings default
-    assert version == "0.101.0"
+    assert version == "0.139.0"
 
 
 @pytest.mark.asyncio
@@ -112,7 +116,7 @@ async def test_rejects_alpha_version_name():
     with patch("app.core.clients.codex_version.aiohttp.ClientSession", return_value=session):
         version = await cache.get_version()
 
-    assert version == "0.101.0"
+    assert version == "0.139.0"
 
 
 @pytest.mark.asyncio
@@ -148,7 +152,7 @@ async def test_fallback_to_settings_default_when_no_cache():
     with patch("app.core.clients.codex_version.aiohttp.ClientSession", return_value=session_fail):
         version = await cache.get_version()
 
-    assert version == "0.101.0"
+    assert version == "0.139.0"
 
 
 @pytest.mark.asyncio
@@ -161,7 +165,7 @@ async def test_fallback_on_network_exception():
     ):
         version = await cache.get_version()
 
-    assert version == "0.101.0"
+    assert version == "0.139.0"
 
 
 @pytest.mark.asyncio
@@ -192,7 +196,7 @@ async def test_missing_name_field_falls_back():
     with patch("app.core.clients.codex_version.aiohttp.ClientSession", return_value=session):
         version = await cache.get_version()
 
-    assert version == "0.101.0"
+    assert version == "0.139.0"
 
 
 def test_ttl_must_be_positive():
@@ -238,7 +242,7 @@ async def test_npm_invalid_version_falls_back_to_settings_default():
     with patch("app.core.clients.codex_version.aiohttp.ClientSession", return_value=session):
         version = await cache.get_version()
 
-    assert version == "0.101.0"
+    assert version == "0.139.0"
 
 
 @pytest.mark.asyncio
@@ -251,7 +255,7 @@ async def test_npm_missing_version_field_falls_back_to_settings_default():
     with patch("app.core.clients.codex_version.aiohttp.ClientSession", return_value=session):
         version = await cache.get_version()
 
-    assert version == "0.101.0"
+    assert version == "0.139.0"
 
 
 @pytest.mark.asyncio

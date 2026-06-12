@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse
 from app.core.bootstrap import ensure_auto_bootstrap_token, log_bootstrap_token
 from app.core.clients.account_http import close_all_account_clients
 from app.core.clients.http import close_http_client, init_http_client
+from app.core.clients.user_agent import codex_cli_default_headers
 from app.core.config.settings import _bridge_advertise_hostname_is_replica_specific, get_settings
 from app.core.config.settings_cache import get_settings_cache
 from app.core.handlers import add_exception_handlers
@@ -463,7 +464,12 @@ async def _wait_for_bridge_advertise_endpoint(
     while time.monotonic() < deadline:
         attempt += 1
         try:
-            async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
+            settings = get_settings()
+            async with aiohttp.ClientSession(
+                timeout=timeout,
+                headers=codex_cli_default_headers(version=settings.model_registry_client_version),
+                trust_env=False,
+            ) as session:
                 async with session.get(probe_url) as response:
                     if response.status == 200:
                         return

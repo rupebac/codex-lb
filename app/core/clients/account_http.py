@@ -46,6 +46,7 @@ from app.core.clients.account_tls import (
     cached_codex_ssl_context,
 )
 from app.core.clients.http import HttpClient, _close_client, acquire_http_client
+from app.core.clients.user_agent import codex_cli_default_headers
 from app.core.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -251,10 +252,13 @@ async def _build_account_http_client(fingerprint: EgressFingerprint) -> HttpClie
 async def _build_socks_account_http_client(connection: AccountProxyConnection) -> HttpClient:
     """Per-account session backed by ``aiohttp_socks.ProxyConnector``."""
 
+    settings = get_settings()
+    default_headers = codex_cli_default_headers(version=settings.model_registry_client_version)
     http_connector = _build_proxy_connector(connection)
     session = aiohttp.ClientSession(
         connector=http_connector,
         timeout=aiohttp.ClientTimeout(total=None),
+        headers=default_headers,
         # An explicit per-account proxy MUST override any HTTP_PROXY /
         # HTTPS_PROXY environment variables — otherwise traffic could leak
         # through the host's default egress.
@@ -265,6 +269,7 @@ async def _build_socks_account_http_client(connection: AccountProxyConnection) -
         websocket_session = aiohttp.ClientSession(
             connector=ws_connector,
             timeout=aiohttp.ClientTimeout(total=None),
+            headers=default_headers,
             trust_env=False,
         )
     except Exception:
@@ -291,6 +296,7 @@ async def _build_direct_account_http_client() -> HttpClient:
     """
 
     settings = get_settings()
+    default_headers = codex_cli_default_headers(version=settings.model_registry_client_version)
     direct_ssl_ctx: ssl.SSLContext | None = _account_ssl_context()
     http_connector = aiohttp.TCPConnector(
         limit=settings.http_connector_limit_per_account_direct,
@@ -300,6 +306,7 @@ async def _build_direct_account_http_client() -> HttpClient:
     session = aiohttp.ClientSession(
         connector=http_connector,
         timeout=aiohttp.ClientTimeout(total=None),
+        headers=default_headers,
         trust_env=True,
     )
     try:
@@ -311,6 +318,7 @@ async def _build_direct_account_http_client() -> HttpClient:
         websocket_session = aiohttp.ClientSession(
             connector=ws_connector,
             timeout=aiohttp.ClientTimeout(total=None),
+            headers=default_headers,
             trust_env=settings.upstream_websocket_trust_env,
         )
     except Exception:
