@@ -53,6 +53,7 @@ from app.core.resilience.degradation import set_degraded, set_normal
 from app.core.usage.quota import apply_usage_quota
 from app.core.utils.time import utcnow
 from app.db.models import Account, AccountStatus, AdditionalUsageHistory, StickySessionKind, UsageHistory
+from app.modules.accounts.egress_status import filter_accounts_for_egress_guardrails
 from app.modules.proxy.account_cache import get_account_selection_cache
 from app.modules.proxy.additional_model_limits import get_additional_quota_key_for_model_id
 from app.modules.proxy.repo_bundle import ProxyRepoFactory, ProxyRepositories
@@ -781,6 +782,10 @@ class LoadBalancer:
                 additional_quota_routing_policies,
             )
             accounts = _selectable_accounts(all_accounts)
+            accounts = filter_accounts_for_egress_guardrails(
+                accounts,
+                get_settings(),
+            )
             if account_ids is not None:
                 allowed_account_ids = set(account_ids)
                 accounts = [account for account in accounts if account.id in allowed_account_ids]

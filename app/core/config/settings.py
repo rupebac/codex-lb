@@ -191,6 +191,12 @@ class Settings(BaseSettings):
         le=96.0,
     )
     account_proxy_probe_timeout_seconds: float = Field(default=10.0, gt=0)
+    account_egress_probe_enabled: bool = True
+    account_egress_probe_url: str = "https://api.ipify.org?format=json"
+    account_egress_probe_timeout_seconds: float = Field(default=8.0, gt=0)
+    account_egress_guardrail_mode: Literal["off", "warn", "block"] = "warn"
+    account_egress_allow_direct_accounts: bool = False
+    account_egress_allow_shared_observed_ip: bool = False
     account_proxy_failure_threshold: int = Field(default=3, ge=1)
     account_proxy_failure_window_seconds: float = Field(default=60.0, gt=0)
     http_connector_limit_per_account_direct: int = Field(default=20, ge=1)

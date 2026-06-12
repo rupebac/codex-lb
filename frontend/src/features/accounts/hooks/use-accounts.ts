@@ -8,7 +8,9 @@ import {
   exportAccountOpenCodeAuth,
   getAccountTrends,
   importAccount,
+  getAccountEgressReport,
   listAccounts,
+  probeAccountEgress,
   pauseAccount,
   reactivateAccount,
   setAccountAlias,
@@ -16,7 +18,7 @@ import {
   updateAccountLimitWarmup,
 } from "@/features/accounts/api";
 import { formatProbeError } from "@/features/accounts/proxy-errors";
-import type { AccountProxyInput, AccountProxySummary } from "@/features/accounts/schemas";
+import type { AccountEgressStatus, AccountProxyInput, AccountProxySummary } from "@/features/accounts/schemas";
 
 function invalidateAccountRelatedQueries(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ["accounts", "list"] });
@@ -180,6 +182,30 @@ export function useSetAccountProxy() {
     onSuccess: () => {
       toast.success("Proxy validated and saved");
       invalidateAccountRelatedQueries(queryClient);
+    },
+  });
+}
+
+export function useAccountEgressReport() {
+  return useQuery({
+    queryKey: ["accounts", "egress"],
+    queryFn: getAccountEgressReport,
+    staleTime: 30_000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useProbeAccountEgress() {
+  const queryClient = useQueryClient();
+  return useMutation<AccountEgressStatus, Error, string>({
+    mutationFn: probeAccountEgress,
+    onSuccess: () => {
+      toast.success("Egress probe completed");
+      invalidateAccountRelatedQueries(queryClient);
+      void queryClient.invalidateQueries({ queryKey: ["accounts", "egress"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Egress probe failed");
     },
   });
 }

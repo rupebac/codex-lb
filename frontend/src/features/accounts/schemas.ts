@@ -95,6 +95,26 @@ export const AccountProxySummarySchema = z.object({
   lastValidatedAt: z.string().datetime({ offset: true }).nullable().optional(),
 });
 
+export const AccountEgressStatusSchema = z.object({
+  accountId: z.string(),
+  status: z.string(),
+  observedIp: z.string().nullable().optional(),
+  checkedAt: z.string().datetime({ offset: true }).nullable().optional(),
+  error: z.string().nullable().optional(),
+  configuredProxy: z.boolean().default(false),
+  proxyRemoteDns: z.boolean().default(true),
+  sharedWithAccountIds: z.array(z.string()).default([]),
+  warnings: z.array(z.string()).default([]),
+});
+
+export const AccountEgressReportResponseSchema = z.object({
+  accounts: z.array(AccountEgressStatusSchema),
+  unknownCount: z.number().int().nonnegative(),
+  failedCount: z.number().int().nonnegative(),
+  directCount: z.number().int().nonnegative(),
+  sharedIpCount: z.number().int().nonnegative(),
+});
+
 export const AccountProxyClearResponseSchema = z.object({
   status: z.string(),
 });
@@ -119,6 +139,7 @@ export const AccountSummarySchema = z.object({
   limitWarmupEnabled: z.boolean().default(false),
   limitWarmup: AccountLimitWarmupStatusSchema.nullable().optional(),
   proxy: AccountProxySummarySchema.nullable().optional(),
+  egress: AccountEgressStatusSchema.nullable().optional(),
 });
 
 export const AccountTrendsResponseSchema = z.object({
@@ -248,6 +269,7 @@ export const OauthCompleteResponseSchema = z.object({
   status: z.string(),
   accountId: z.string().nullable().optional(),
   proxy: AccountProxySummarySchema.nullable().optional(),
+  egress: AccountEgressStatusSchema.nullable().optional(),
 });
 
 export const OauthResetResponseSchema = z.object({
@@ -305,6 +327,8 @@ export type AccountAliasResponse = z.infer<typeof AccountAliasResponseSchema>;
 export type AccountLimitWarmupStatus = z.infer<typeof AccountLimitWarmupStatusSchema>;
 export type AccountProxyInput = z.infer<typeof AccountProxyInputSchema>;
 export type AccountProxySummary = z.infer<typeof AccountProxySummarySchema>;
+export type AccountEgressStatus = z.infer<typeof AccountEgressStatusSchema>;
+export type AccountEgressReportResponse = z.infer<typeof AccountEgressReportResponseSchema>;
 export type AccountImportResponse = z.infer<typeof AccountImportResponseSchema>;
 export type AccountExportResponse = z.infer<typeof AccountExportResponseSchema>;
 export type AccountAdditionalWindow = z.infer<typeof AccountAdditionalWindowSchema>;

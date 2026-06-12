@@ -26,6 +26,10 @@ def test_account_proxy_columns_are_nullable_with_remote_dns_default_true() -> No
         "proxy_password_encrypted",
         "proxy_label",
         "proxy_last_validated_at",
+        "egress_last_observed_ip",
+        "egress_last_observed_at",
+        "egress_last_checked_at",
+        "egress_last_probe_error",
     )
     for column_name in nullable_proxy_columns:
         column = columns[column_name]
@@ -39,3 +43,9 @@ def test_account_proxy_columns_are_nullable_with_remote_dns_default_true() -> No
     assert remote_dns.default is not None
     assert bool(getattr(remote_dns.default, "arg", remote_dns.default)) is True
     assert remote_dns.server_default is not None
+
+    egress_status = columns["egress_last_probe_status"]
+    assert egress_status.nullable is False, "egress_last_probe_status must be NOT NULL"
+    assert egress_status.default is not None
+    assert getattr(egress_status.default, "arg", egress_status.default) == "unknown"
+    assert egress_status.server_default is not None

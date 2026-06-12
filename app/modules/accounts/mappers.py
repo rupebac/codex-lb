@@ -13,6 +13,7 @@ from app.db.models import Account, AccountLimitWarmup, AccountStatus, UsageHisto
 from app.modules.accounts.schemas import (
     AccountAdditionalQuota,
     AccountAuthStatus,
+    AccountEgressStatus,
     AccountLimitWarmupStatus,
     AccountProxySummary,
     AccountRequestUsage,
@@ -35,6 +36,7 @@ def build_account_summaries(
     limit_warmups_by_account: dict[str, AccountLimitWarmup] | None = None,
     encryptor: TokenEncryptor,
     include_auth: bool = True,
+    egress_by_account_id: dict[str, AccountEgressStatus] | None = None,
 ) -> list[AccountSummary]:
     return [
         _account_to_summary(
@@ -46,6 +48,7 @@ def build_account_summaries(
             limit_warmups_by_account.get(account.id) if limit_warmups_by_account else None,
             encryptor,
             include_auth=include_auth,
+            egress=egress_by_account_id.get(account.id) if egress_by_account_id else None,
         )
         for account in accounts
     ]
@@ -60,6 +63,7 @@ def _account_to_summary(
     limit_warmup: AccountLimitWarmup | None,
     encryptor: TokenEncryptor,
     include_auth: bool = True,
+    egress: AccountEgressStatus | None = None,
 ) -> AccountSummary:
     plan_type = coerce_account_plan_type(account.plan_type, DEFAULT_PLAN)
     auth_status = _build_auth_status(account, encryptor) if include_auth else None
@@ -147,6 +151,7 @@ def _account_to_summary(
         limit_warmup_enabled=account.limit_warmup_enabled,
         limit_warmup=_limit_warmup_to_status(limit_warmup),
         proxy=_build_proxy_summary(account),
+        egress=egress,
     )
 
 

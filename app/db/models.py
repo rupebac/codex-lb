@@ -122,6 +122,16 @@ class Account(Base):
     )
     proxy_label: Mapped[str | None] = mapped_column(String, nullable=True)
     proxy_last_validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    egress_last_observed_ip: Mapped[str | None] = mapped_column(String, nullable=True)
+    egress_last_observed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    egress_last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    egress_last_probe_status: Mapped[str] = mapped_column(
+        String,
+        default="unknown",
+        server_default="unknown",
+        nullable=False,
+    )
+    egress_last_probe_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     api_key_assignments: Mapped[list["ApiKeyAccountAssignment"]] = relationship(
         "ApiKeyAccountAssignment",

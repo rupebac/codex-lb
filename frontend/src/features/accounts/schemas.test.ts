@@ -131,3 +131,36 @@ describe("ImportStateSchema", () => {
     ).toBe(true);
   });
 });
+
+
+import { AccountEgressReportResponseSchema, AccountEgressStatusSchema } from "@/features/accounts/schemas";
+
+describe("AccountEgressStatusSchema", () => {
+  it("parses a direct egress status payload", () => {
+    const parsed = AccountEgressStatusSchema.parse({
+      accountId: "acc-1",
+      status: "direct_egress",
+      observedIp: "93.184.216.34",
+      checkedAt: "2026-06-12T12:00:00+00:00",
+      configuredProxy: false,
+      proxyRemoteDns: true,
+      sharedWithAccountIds: [],
+      warnings: [],
+    });
+    expect(parsed.status).toBe("direct_egress");
+    expect(parsed.observedIp).toBe("93.184.216.34");
+  });
+});
+
+describe("AccountEgressReportResponseSchema", () => {
+  it("parses fleet summary counts", () => {
+    const parsed = AccountEgressReportResponseSchema.parse({
+      accounts: [],
+      unknownCount: 2,
+      failedCount: 1,
+      directCount: 1,
+      sharedIpCount: 2,
+    });
+    expect(parsed.sharedIpCount).toBe(2);
+  });
+});

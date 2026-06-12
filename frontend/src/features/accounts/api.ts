@@ -4,6 +4,8 @@ import {
   AccountActionResponseSchema,
   AccountAliasRequestSchema,
   AccountAliasResponseSchema,
+  AccountEgressReportResponseSchema,
+  AccountEgressStatusSchema,
   AccountExportResponseSchema,
   AccountOpenCodeAuthExportResponseSchema,
   AccountImportResponseSchema,
@@ -122,6 +124,17 @@ export function setAccountProxy(accountId: string, payload: unknown) {
     `${ACCOUNTS_BASE_PATH}/${encodeURIComponent(accountId)}/proxy`,
     AccountProxySummarySchema,
     { body: validated },
+  );
+}
+
+export function getAccountEgressReport() {
+  return get(`${ACCOUNTS_BASE_PATH}/egress`, AccountEgressReportResponseSchema);
+}
+
+export function probeAccountEgress(accountId: string) {
+  return post(
+    `${ACCOUNTS_BASE_PATH}/${encodeURIComponent(accountId)}/egress/probe`,
+    AccountEgressStatusSchema,
   );
 }
 

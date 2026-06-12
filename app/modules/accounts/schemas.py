@@ -125,6 +125,26 @@ class AccountProxyClearResponse(DashboardModel):
     status: str
 
 
+class AccountEgressStatus(DashboardModel):
+    account_id: str
+    status: str
+    observed_ip: str | None = None
+    checked_at: datetime | None = None
+    error: str | None = None
+    configured_proxy: bool = False
+    proxy_remote_dns: bool = True
+    shared_with_account_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AccountEgressReportResponse(DashboardModel):
+    accounts: list[AccountEgressStatus] = Field(default_factory=list)
+    unknown_count: int = 0
+    failed_count: int = 0
+    direct_count: int = 0
+    shared_ip_count: int = 0
+
+
 class AccountSummary(DashboardModel):
     account_id: str
     email: str
@@ -149,6 +169,7 @@ class AccountSummary(DashboardModel):
     limit_warmup_enabled: bool = False
     limit_warmup: AccountLimitWarmupStatus | None = None
     proxy: AccountProxySummary | None = None
+    egress: AccountEgressStatus | None = None
 
 
 class AccountsResponse(DashboardModel):

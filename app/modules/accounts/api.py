@@ -15,6 +15,8 @@ from app.modules.accounts.schemas import (
     AccountAliasRequest,
     AccountAliasResponse,
     AccountDeleteResponse,
+    AccountEgressReportResponse,
+    AccountEgressStatus,
     AccountExportResponse,
     AccountImportResponse,
     AccountLimitWarmupUpdateRequest,
@@ -31,6 +33,7 @@ from app.modules.accounts.schemas import (
 from app.modules.accounts.service import (
     AccountCredentialsUnrecoverableError,
     AccountNotFoundError,
+    EgressProbeDisabledError,
     InvalidAuthJsonError,
     ProxyPasswordUnrecoverableError,
 )
@@ -48,6 +51,29 @@ async def list_accounts(
 ) -> AccountsResponse:
     accounts = await context.service.list_accounts()
     return AccountsResponse(accounts=accounts)
+
+
+@router.get("/egress", response_model=AccountEgressReportResponse)
+async def get_account_egress_report(
+    context: AccountsContext = Depends(get_accounts_context),
+) -> AccountEgressReportResponse:
+    return await context.service.get_account_egress_report()
+
+
+@router.post("/{account_id}/egress/probe", response_model=AccountEgressStatus)
+async def probe_account_egress(
+    account_id: str,
+    context: AccountsContext = Depends(get_accounts_context),
+) -> AccountEgressStatus | JSONResponse:
+    try:
+        return await context.service.probe_account_egress(account_id)
+    except AccountNotFoundError as exc:
+        raise DashboardNotFoundError("Account not found", code="account_not_found") from exc
+    except EgressProbeDisabledError:
+        return JSONResponse(
+            status_code=422,
+            content=dashboard_error("egress_probe_disabled", "Account egress probing is disabled"),
+        )
 
 
 @router.get("/{account_id}/trends", response_model=AccountTrendsResponse)

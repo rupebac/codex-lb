@@ -18,6 +18,16 @@ _UNSET = object()
 _INTERNAL_LIMIT_WARMUP_SOURCE = "limit_warmup"
 
 
+def _unknown_egress_probe_values() -> dict[str, object | None]:
+    return {
+        "egress_last_observed_ip": None,
+        "egress_last_observed_at": None,
+        "egress_last_checked_at": None,
+        "egress_last_probe_status": "unknown",
+        "egress_last_probe_error": None,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class AccountRequestUsageSummary:
     request_count: int
@@ -455,11 +465,35 @@ class AccountsRepository:
             "proxy_label": label,
             "proxy_last_validated_at": last_validated_at,
         }
+        values.update(_unknown_egress_probe_values())
         if rotated_tokens is not None:
             values["access_token_encrypted"] = rotated_tokens.access_token_encrypted
             values["refresh_token_encrypted"] = rotated_tokens.refresh_token_encrypted
             values["id_token_encrypted"] = rotated_tokens.id_token_encrypted
             values["last_refresh"] = rotated_tokens.last_refresh
+        result = await self._session.execute(
+            update(Account).where(Account.id == account_id).values(**values).returning(Account.id)
+        )
+        await self._session.commit()
+        return result.scalar_one_or_none() is not None
+
+    async def update_egress_probe_result(
+        self,
+        account_id: str,
+        *,
+        observed_ip: str | None,
+        observed_at: datetime | None,
+        checked_at: datetime | None,
+        probe_status: str,
+        probe_error: str | None,
+    ) -> bool:
+        values: dict[str, object | None] = {
+            "egress_last_observed_ip": observed_ip,
+            "egress_last_observed_at": observed_at,
+            "egress_last_checked_at": checked_at,
+            "egress_last_probe_status": probe_status,
+            "egress_last_probe_error": probe_error,
+        }
         result = await self._session.execute(
             update(Account).where(Account.id == account_id).values(**values).returning(Account.id)
         )
@@ -485,6 +519,7 @@ class AccountsRepository:
             "proxy_label": None,
             "proxy_last_validated_at": None,
         }
+        values.update(_unknown_egress_probe_values())
         result = await self._session.execute(
             update(Account).where(Account.id == account_id).values(**values).returning(Account.id)
         )
@@ -570,6 +605,11 @@ def _apply_account_updates(
         target.proxy_remote_dns = source.proxy_remote_dns
         target.proxy_label = source.proxy_label
         target.proxy_last_validated_at = source.proxy_last_validated_at
+        target.egress_last_observed_ip = None
+        target.egress_last_observed_at = None
+        target.egress_last_checked_at = None
+        target.egress_last_probe_status = "unknown"
+        target.egress_last_probe_error = None
 
 
 def _ensure_reauth_identity_matches(existing: Account, source: Account) -> None:

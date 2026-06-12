@@ -19,6 +19,7 @@ from app.core.auth import (
 )
 from app.core.auth.api_key_cache import get_api_key_cache
 from app.core.cache.invalidation import NAMESPACE_API_KEY, get_cache_invalidation_poller
+from app.core.clients.account_egress_probe import probe_account_egress_ip
 from app.core.clients.account_http import invalidate_account_client
 from app.core.clients.account_proxy_probe import (
     ProbeReason,
@@ -26,15 +27,23 @@ from app.core.clients.account_proxy_probe import (
     ProxyProbeError,
     probe_account_proxy,
 )
+from app.core.config.settings import get_settings
 from app.core.crypto import TokenEncryptor
 from app.core.plan_types import coerce_account_plan_type
 from app.core.utils.time import naive_utc_to_epoch, to_utc_naive, utcnow
 from app.db.models import Account, AccountStatus
+from app.modules.accounts.egress_status import (
+    build_account_egress_report,
+    build_account_egress_statuses,
+    egress_status_by_account_id,
+)
 from app.modules.accounts.mappers import build_account_summaries, build_account_usage_trends
 from app.modules.accounts.repository import AccountsRepository, _RotatedTokens
 from app.modules.accounts.schemas import (
     AccountAdditionalQuota,
     AccountAdditionalWindow,
+    AccountEgressReportResponse,
+    AccountEgressStatus,
     AccountExportResponse,
     AccountImportResponse,
     AccountOpenCodeAuthExportAccount,
@@ -87,6 +96,13 @@ class ProxyPasswordUnrecoverableError(Exception):
 
     def __init__(self) -> None:
         super().__init__("Stored proxy password cannot be decrypted; please re-enter it")
+
+
+class EgressProbeDisabledError(Exception):
+    """Raised when egress probing is disabled via settings."""
+
+    def __init__(self) -> None:
+        super().__init__("Account egress probing is disabled")
 
 
 class AccountCredentialsUnrecoverableError(Exception):
@@ -184,6 +200,7 @@ class AccountsService:
         for account_quota_list in additional_quotas_by_account.values():
             account_quota_list.sort(key=lambda quota: quota.display_label or quota.quota_key or quota.limit_name)
 
+        egress_by_id = egress_status_by_account_id(accounts)
         return build_account_summaries(
             accounts=accounts,
             primary_usage=primary_usage,
@@ -192,6 +209,7 @@ class AccountsService:
             additional_quotas_by_account=additional_quotas_by_account,
             limit_warmups_by_account=limit_warmups_by_account,
             encryptor=self._encryptor,
+            egress_by_account_id=egress_by_id,
         )
 
     async def get_account_trends(self, account_id: str) -> AccountTrendsResponse | None:
@@ -676,6 +694,49 @@ class AccountsService:
             expected_status=AccountStatus.DEACTIVATED,
             expected_deactivation_reason="proxy_unreachable",
         )
+
+    async def get_account_egress_report(self) -> AccountEgressReportResponse:
+        accounts = await self._repo.list_accounts()
+        return build_account_egress_report(accounts)
+
+    async def probe_account_egress(self, account_id: str) -> AccountEgressStatus:
+        settings = get_settings()
+        if not settings.account_egress_probe_enabled:
+            raise EgressProbeDisabledError()
+
+        account = await self._repo.get_by_id(account_id)
+        if account is None:
+            raise AccountNotFoundError(account_id)
+
+        result = await probe_account_egress_ip(account_id, settings=settings)
+        if result.ok:
+            updated = await self._repo.update_egress_probe_result(
+                account_id,
+                observed_ip=result.observed_ip,
+                observed_at=result.checked_at,
+                checked_at=result.checked_at,
+                probe_status="ok",
+                probe_error=None,
+            )
+        else:
+            updated = await self._repo.update_egress_probe_result(
+                account_id,
+                observed_ip=None,
+                observed_at=None,
+                checked_at=result.checked_at,
+                probe_status="probe_failed",
+                probe_error=result.error,
+            )
+        if not updated:
+            raise AccountNotFoundError(account_id)
+
+        get_account_selection_cache().invalidate()
+        accounts = await self._repo.list_accounts(refresh_existing=True)
+        statuses = build_account_egress_statuses(accounts)
+        for status in statuses:
+            if status.account_id == account_id:
+                return status
+        raise AccountNotFoundError(account_id)
 
 
 def _opencode_auth_export_filename(account: Account) -> str:

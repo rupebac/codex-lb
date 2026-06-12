@@ -97,6 +97,14 @@ async def test_update_proxy_overwrites_previous_configuration(db_setup):
             label="old",
             last_validated_at=utcnow(),
         )
+        await repo.update_egress_probe_result(
+            "acc_swap",
+            observed_ip="93.184.216.34",
+            observed_at=utcnow(),
+            checked_at=utcnow(),
+            probe_status="ok",
+            probe_error=None,
+        )
 
         ok = await repo.update_proxy(
             "acc_swap",
@@ -119,6 +127,13 @@ async def test_update_proxy_overwrites_previous_configuration(db_setup):
         assert record.remote_dns is False
         assert record.label is None
         assert record.last_validated_at is None
+        result = await session.execute(select(Account).where(Account.id == "acc_swap"))
+        account = result.scalar_one()
+        assert account.egress_last_observed_ip is None
+        assert account.egress_last_observed_at is None
+        assert account.egress_last_checked_at is None
+        assert account.egress_last_probe_status == "unknown"
+        assert account.egress_last_probe_error is None
 
 
 @pytest.mark.asyncio
@@ -137,6 +152,14 @@ async def test_clear_proxy_resets_all_fields(db_setup):
             label="lbl",
             last_validated_at=utcnow(),
         )
+        await repo.update_egress_probe_result(
+            "acc_clear",
+            observed_ip="93.184.216.34",
+            observed_at=utcnow(),
+            checked_at=utcnow(),
+            probe_status="ok",
+            probe_error=None,
+        )
 
         assert await repo.clear_proxy("acc_clear") is True
         assert await repo.get_proxy_config("acc_clear") is None
@@ -152,6 +175,11 @@ async def test_clear_proxy_resets_all_fields(db_setup):
         assert account.proxy_remote_dns is True
         assert account.proxy_label is None
         assert account.proxy_last_validated_at is None
+        assert account.egress_last_observed_ip is None
+        assert account.egress_last_observed_at is None
+        assert account.egress_last_checked_at is None
+        assert account.egress_last_probe_status == "unknown"
+        assert account.egress_last_probe_error is None
 
 
 @pytest.mark.asyncio
