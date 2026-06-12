@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.balancer import AccountState
-from app.db.models import AccountStatus
+from app.core.clients.user_agent import CODEX_CLI_ORIGINATOR
+from app.db.models import Account, AccountStatus
 from app.modules.quota_planner import scheduler as scheduler_module
+from app.modules.quota_planner import warmup as warmup_module
 from app.modules.quota_planner.logic import (
     DemandForecastSlot,
     PlannerAction,
@@ -20,6 +24,7 @@ from app.modules.quota_planner.logic import (
     simulate_pool,
 )
 from app.modules.quota_planner.repository import DemandBin
+from app.modules.quota_planner.warmup import QuotaWarmupService
 
 pytestmark = pytest.mark.unit
 
@@ -102,6 +107,40 @@ def test_quota_planner_scheduler_is_disabled_by_default(monkeypatch) -> None:
     scheduler = scheduler_module.build_quota_planner_scheduler()
 
     assert scheduler._enabled is False
+
+
+@pytest.mark.asyncio
+async def test_quota_warmup_uses_codex_cli_identity_headers(monkeypatch) -> None:
+    captured_headers: dict[str, str] = {}
+
+    async def _stream_responses(_payload, headers, *_args, **_kwargs):
+        captured_headers.update(headers)
+        if False:
+            yield b""
+
+    account = Account(
+        id="acc_warmup_identity",
+        email="warmup-identity@example.com",
+        access_token_encrypted=b"encrypted-access",
+        refresh_token_encrypted=b"refresh",
+        id_token_encrypted=b"id",
+        chatgpt_account_id="chatgpt-warmup-identity",
+        plan_type="plus",
+        status=AccountStatus.ACTIVE,
+    )
+    service = QuotaWarmupService(session=cast(AsyncSession, object()))
+    monkeypatch.setattr(service._encryptor, "decrypt", lambda _value: "access-token")
+    monkeypatch.setattr(warmup_module, "stream_responses", _stream_responses)
+
+    await service._send_warmup_probe(
+        account=account,
+        model="gpt-5.4-mini",
+        request_id="quota-warmup-test",
+    )
+
+    assert captured_headers["x-request-id"] == "quota-warmup-test"
+    assert captured_headers["originator"] == CODEX_CLI_ORIGINATOR
+    assert captured_headers["User-Agent"].startswith(f"{CODEX_CLI_ORIGINATOR}/")
 
 
 def test_candidate_start_times_do_not_floor_now_into_the_past() -> None:

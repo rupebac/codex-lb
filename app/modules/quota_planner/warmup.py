@@ -10,6 +10,7 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clients.proxy import stream_responses
+from app.core.clients.user_agent import codex_cli_default_headers
 from app.core.crypto import TokenEncryptor
 from app.core.openai.parsing import parse_sse_event
 from app.core.openai.requests import ResponsesRequest
@@ -403,7 +404,7 @@ class QuotaWarmupService:
                 "generate": False,
             }
         )
-        headers = {"x-request-id": request_id, "user-agent": "codex-lb-quota-planner"}
+        headers = {"x-request-id": request_id, **codex_cli_default_headers()}
         access_token = self._encryptor.decrypt(account.access_token_encrypted)
         upstream_account_id = account.chatgpt_account_id
         usage = WarmupUsage(input_tokens=0, output_tokens=0, cached_input_tokens=0, reasoning_tokens=None)
