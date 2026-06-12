@@ -54,10 +54,10 @@ def test_should_refresh_without_account_id_uses_unjittered_interval():
 
 
 def test_jitter_offset_is_stable_per_account():
-    from app.core.auth.refresh import _refresh_jitter_offset_seconds
+    from app.core.auth.refresh import refresh_jitter_offset_seconds
 
-    a = _refresh_jitter_offset_seconds("acc_target", jitter_hours=18.0)
-    b = _refresh_jitter_offset_seconds("acc_target", jitter_hours=18.0)
+    a = refresh_jitter_offset_seconds("acc_target", jitter_hours=18.0)
+    b = refresh_jitter_offset_seconds("acc_target", jitter_hours=18.0)
     assert a == b
 
 
@@ -65,29 +65,29 @@ def test_jitter_offset_differs_across_accounts():
     """Two distinct account IDs MUST land in distinct slots of the
     window (probability of accidental collision is ~zero for SHA-256).
     """
-    from app.core.auth.refresh import _refresh_jitter_offset_seconds
+    from app.core.auth.refresh import refresh_jitter_offset_seconds
 
-    a = _refresh_jitter_offset_seconds("acc_one", jitter_hours=18.0)
-    b = _refresh_jitter_offset_seconds("acc_two", jitter_hours=18.0)
+    a = refresh_jitter_offset_seconds("acc_one", jitter_hours=18.0)
+    b = refresh_jitter_offset_seconds("acc_two", jitter_hours=18.0)
     assert a != b
 
 
 def test_jitter_offset_is_bounded_by_window():
     """The offset MUST never escape ``[0, jitter*3600]``."""
-    from app.core.auth.refresh import _refresh_jitter_offset_seconds
+    from app.core.auth.refresh import refresh_jitter_offset_seconds
 
     jitter_hours = 18.0
     bound = jitter_hours * 3600.0
     for i in range(200):
-        offset = _refresh_jitter_offset_seconds(f"acc_{i}", jitter_hours=jitter_hours)
+        offset = refresh_jitter_offset_seconds(f"acc_{i}", jitter_hours=jitter_hours)
         assert 0 <= offset <= bound
 
 
 def test_jitter_zero_window_disables_offset():
     """Operators that explicitly want the un-jittered interval back."""
-    from app.core.auth.refresh import _refresh_jitter_offset_seconds
+    from app.core.auth.refresh import refresh_jitter_offset_seconds
 
-    assert _refresh_jitter_offset_seconds("acc", jitter_hours=0.0) == 0.0
+    assert refresh_jitter_offset_seconds("acc", jitter_hours=0.0) == 0.0
 
 
 def test_should_refresh_applies_account_jitter_to_threshold():

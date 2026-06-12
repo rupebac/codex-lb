@@ -10,7 +10,22 @@ from hashlib import sha256
 from typing import Protocol, TypeAlias
 
 from app.core.auth import DEFAULT_PLAN, OpenAIAuthClaims, extract_id_token_claims
-from app.core.auth.refresh import RefreshError, TokenRefreshResult, refresh_access_token, should_refresh
+from app.core.auth.refresh import RefreshError, TokenRefreshResult, refresh_access_token
+from app.core.auth.token_refresh_scheduler import (
+    BackgroundTokenRefreshPacerLease,
+    TokenRefreshDeferred,
+    TokenRefreshScheduleUpdate,
+    TokenRefreshSource,
+    apply_schedule_update_to_account,
+    build_failure_schedule_update,
+    build_skip_schedule_update,
+    build_success_schedule_update,
+    evaluate_refresh_decision,
+    get_background_token_refresh_pacer,
+    is_background_refresh_deferred,
+    log_refresh_decision,
+    scheduler_now,
+)
 from app.core.balancer import PERMANENT_FAILURE_CODES
 from app.core.clients.account_http import invalidate_account_client
 from app.core.config.settings import get_settings
@@ -44,6 +59,13 @@ class AccountsRepositoryPort(Protocol):
         plan_type: str | None = None,
         email: str | None = None,
         chatgpt_account_id: str | None = None,
+        token_refresh_schedule: TokenRefreshScheduleUpdate | None = None,
+    ) -> bool: ...
+
+    async def update_token_refresh_schedule(
+        self,
+        account_id: str,
+        schedule: TokenRefreshScheduleUpdate,
     ) -> bool: ...
 
 
@@ -155,15 +177,61 @@ class AuthManager:
         # connection. See _run_refresh.
         self._refresh_repo_factory = refresh_repo_factory
 
-    async def ensure_fresh(self, account: Account, *, force: bool = False) -> Account:
-        if force or should_refresh(account.last_refresh, account_id=account.id):
-            account = await _REFRESH_SINGLEFLIGHT.run(
-                _refresh_singleflight_key(self._encryptor, account),
-                lambda: self._run_refresh(account),
+    async def ensure_fresh(
+        self,
+        account: Account,
+        *,
+        force: bool = False,
+        source: TokenRefreshSource = TokenRefreshSource.LIVE_REQUEST,
+    ) -> Account:
+        decision = evaluate_refresh_decision(account, source=source, force=force)
+        skip_update = build_skip_schedule_update(
+            source=source,
+            reason=decision.reason,
+            attempt_at=scheduler_now(),
+            next_allowed_at=decision.next_allowed_at,
+            initialized_schedule=decision.initialized_schedule,
+        )
+        if skip_update is not None:
+            await self._apply_schedule_update(account, skip_update)
+
+        if not decision.allowed:
+            log_refresh_decision(
+                account.id,
+                source=source,
+                decision=decision.reason,
+                next_allowed_at=decision.next_allowed_at,
+                failure_count=account.token_refresh_failure_count,
             )
+            if is_background_refresh_deferred(decision.reason) and (force or decision.reason != "scheduled"):
+                raise TokenRefreshDeferred(decision.reason, next_allowed_at=decision.next_allowed_at)
+            return await self._ensure_chatgpt_account_id(account)
+
+        account = await _REFRESH_SINGLEFLIGHT.run(
+            _refresh_singleflight_key(self._encryptor, account),
+            lambda: self._run_refresh(
+                account,
+                source=source,
+                bypass_background_pacer=decision.bypass_background_pacer,
+                next_allowed_at=decision.next_allowed_at,
+            ),
+        )
         return await self._ensure_chatgpt_account_id(account)
 
-    async def _run_refresh(self, account: Account) -> Account:
+    async def _apply_schedule_update(self, account: Account, update: TokenRefreshScheduleUpdate) -> None:
+        apply_schedule_update_to_account(account, update)
+        if not update.repo_field_names():
+            return
+        await self._repo.update_token_refresh_schedule(account.id, update)
+
+    async def _run_refresh(
+        self,
+        account: Account,
+        *,
+        source: TokenRefreshSource,
+        bypass_background_pacer: bool,
+        next_allowed_at: datetime | None,
+    ) -> Account:
         """Singleflight body for token refresh.
 
         Runs inside a detached task that the singleflight keeps alive with
@@ -180,13 +248,70 @@ class AuthManager:
         repo (callers whose session is not client-cancellable, e.g. the usage
         refresh scheduler).
         """
-        if self._refresh_repo_factory is None:
-            return await self.refresh_account(account)
-        async with self._refresh_repo_factory() as repo:
-            owned = AuthManager(repo, acquire_refresh_admission=self._acquire_refresh_admission)
-            return await owned.refresh_account(account)
+        pacer_lease: BackgroundTokenRefreshPacerLease | None = None
+        if not bypass_background_pacer:
+            pacer_lease = await get_background_token_refresh_pacer().acquire()
 
-    async def refresh_account(self, account: Account) -> Account:
+        attempt_at = scheduler_now()
+        log_refresh_decision(
+            account.id,
+            source=source,
+            decision="started",
+            next_allowed_at=next_allowed_at,
+            failure_count=account.token_refresh_failure_count,
+        )
+
+        try:
+            if self._refresh_repo_factory is None:
+                return await self._refresh_account_with_schedule_failure_handling(
+                    account,
+                    source=source,
+                    attempt_at=attempt_at,
+                )
+            async with self._refresh_repo_factory() as repo:
+                owned = AuthManager(repo, acquire_refresh_admission=self._acquire_refresh_admission)
+                return await owned._refresh_account_with_schedule_failure_handling(
+                    account,
+                    source=source,
+                    attempt_at=attempt_at,
+                )
+        finally:
+            if pacer_lease is not None:
+                pacer_lease.release()
+
+    async def _refresh_account_with_schedule_failure_handling(
+        self,
+        account: Account,
+        *,
+        source: TokenRefreshSource,
+        attempt_at: datetime,
+    ) -> Account:
+        try:
+            return await self.refresh_account(account, source=source, attempt_at=attempt_at)
+        except RefreshError as exc:
+            failure_update = build_failure_schedule_update(
+                account,
+                source=source,
+                attempt_at=attempt_at,
+                is_permanent=exc.is_permanent,
+            )
+            await self._apply_schedule_update(account, failure_update)
+            log_refresh_decision(
+                account.id,
+                source=source,
+                decision="permanent_failure" if exc.is_permanent else "transient_failure",
+                next_allowed_at=account.token_refresh_next_allowed_at,
+                failure_count=account.token_refresh_failure_count,
+            )
+            raise
+
+    async def refresh_account(
+        self,
+        account: Account,
+        *,
+        source: TokenRefreshSource | None = None,
+        attempt_at: datetime | None = None,
+    ) -> Account:
         refresh_token = self._encryptor.decrypt(account.refresh_token_encrypted)
         try:
             result = await self._refresh_tokens(refresh_token, account_id=account.id)
@@ -234,6 +359,16 @@ class AuthManager:
         if result.email:
             account.email = result.email
 
+        success_schedule: TokenRefreshScheduleUpdate | None = None
+        if source is not None and attempt_at is not None:
+            success_schedule = build_success_schedule_update(
+                account,
+                source=source,
+                attempt_at=attempt_at,
+                last_refresh=account.last_refresh,
+            )
+            apply_schedule_update_to_account(account, success_schedule)
+
         await self._repo.update_tokens(
             account.id,
             access_token_encrypted=account.access_token_encrypted,
@@ -243,6 +378,7 @@ class AuthManager:
             plan_type=account.plan_type,
             email=account.email,
             chatgpt_account_id=account.chatgpt_account_id,
+            token_refresh_schedule=success_schedule,
         )
         return account
 

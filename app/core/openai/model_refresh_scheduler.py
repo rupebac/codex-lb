@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from app.core.auth.refresh import RefreshError
+from app.core.auth.token_refresh_scheduler import TokenRefreshSource
 from app.core.clients.account_http import invalidate_account_client
 from app.core.clients.model_fetcher import ModelFetchError, fetch_models_for_plan
 from app.core.config.settings import get_settings
@@ -224,14 +225,14 @@ async def _ensure_fresh_with_transport_recovery(
     force: bool = False,
 ) -> Account:
     try:
-        return await auth_manager.ensure_fresh(account, force=force)
+        return await auth_manager.ensure_fresh(account, force=force, source=TokenRefreshSource.STARTUP)
     except RefreshError as exc:
         if not exc.transport_error or transport_recovery.attempted:
             raise
 
         await _invalidate_account_client_after_transport_error(account, exc)
         transport_recovery.attempted = True
-        return await auth_manager.ensure_fresh(account, force=force)
+        return await auth_manager.ensure_fresh(account, force=force, source=TokenRefreshSource.STARTUP)
 
 
 async def _fetch_models_with_transport_recovery(

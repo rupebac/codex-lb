@@ -10,6 +10,7 @@ from typing import AsyncContextManager, Callable, Protocol
 
 from app.core import usage as usage_core
 from app.core.auth.refresh import RefreshError
+from app.core.auth.token_refresh_scheduler import TokenRefreshDeferred, TokenRefreshSource
 from app.core.clients.proxy import override_stream_timeouts, stream_responses
 from app.core.crypto import TokenEncryptor
 from app.core.openai.model_registry import get_model_registry
@@ -131,6 +132,14 @@ class StreamingLimitWarmupSender:
                 fresh_account = await self._ensure_fresh(account)
                 access_token = self._encryptor.decrypt(fresh_account.access_token_encrypted)
                 chatgpt_account_id = fresh_account.chatgpt_account_id
+        except TokenRefreshDeferred as exc:
+            return LimitWarmupSendResult(
+                request_id=request_id,
+                success=False,
+                latency_ms=_elapsed_ms(started),
+                error_code="auth_refresh_deferred",
+                error_message=exc.reason,
+            )
         except RefreshError as exc:
             return LimitWarmupSendResult(
                 request_id=request_id,
@@ -213,12 +222,12 @@ class StreamingLimitWarmupSender:
 
     async def _ensure_fresh(self, account: Account) -> Account:
         if self._accounts_repo_factory is None:
-            return await self._auth_manager.ensure_fresh(account)
+            return await self._auth_manager.ensure_fresh(account, source=TokenRefreshSource.WARMUP)
         async with self._accounts_repo_factory() as accounts_repo:
             return await AuthManager(
                 accounts_repo,
                 refresh_repo_factory=self._accounts_repo_factory,
-            ).ensure_fresh(account)
+            ).ensure_fresh(account, source=TokenRefreshSource.WARMUP)
 
 
 class LimitWarmupService:

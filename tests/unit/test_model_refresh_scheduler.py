@@ -57,7 +57,7 @@ class _StubAuthManager:
     def __init__(self, _repo: object) -> None:
         pass
 
-    async def ensure_fresh(self, account: Account, *, force: bool = False) -> Account:
+    async def ensure_fresh(self, account: Account, *, force: bool = False, source: object = None) -> Account:
         return account
 
 
@@ -161,7 +161,7 @@ async def test_fetch_with_failover_refreshes_http_client_after_token_refresh_tra
         def __init__(self, _repo: object) -> None:
             pass
 
-        async def ensure_fresh(self, account: Account, *, force: bool = False) -> Account:
+        async def ensure_fresh(self, account: Account, *, force: bool = False, source: object = None) -> Account:
             nonlocal ensure_fresh_calls
             ensure_fresh_calls += 1
             if ensure_fresh_calls == 1:

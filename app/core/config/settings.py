@@ -190,6 +190,12 @@ class Settings(BaseSettings):
         # accordingly.
         le=96.0,
     )
+    account_token_refresh_background_concurrency: int = Field(default=1, ge=1)
+    account_token_refresh_min_start_spacing_seconds: float = Field(default=300.0, ge=0.0)
+    account_token_refresh_initial_spread_hours: float = Field(default=24.0, ge=0.0)
+    account_token_refresh_failure_backoff_base_seconds: float = Field(default=300.0, ge=0.0)
+    account_token_refresh_failure_backoff_max_seconds: float = Field(default=3600.0, ge=0.0)
+    account_token_refresh_background_refresh_quota_exceeded: bool = False
     account_proxy_probe_timeout_seconds: float = Field(default=10.0, gt=0)
     account_egress_probe_enabled: bool = True
     account_egress_probe_url: str = "https://api.ipify.org?format=json"

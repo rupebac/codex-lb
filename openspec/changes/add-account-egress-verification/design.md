@@ -33,6 +33,10 @@ Egress verification closes that gap by probing through `lease_account_http_clien
 9. **Never block on `unknown` alone** — fresh installs remain routable before first probe.
 10. **Block filter location** — `load_balancer._load_selection_inputs` after `_selectable_accounts`, not `balancer/logic.py`.
 11. **Selection cache invalidation** — `probe_account_egress` must call `get_account_selection_cache().invalidate()` after persisting egress fields so `block` mode cannot use stale cached eligibility.
+12. **Dashboard chip, not card** — the accounts dashboard should expose egress
+    risk as compact chips in existing account surfaces. Do not add a new
+    full-width card or nest a card inside the account detail panel for the
+    summary state.
 
 ## Settings (normative defaults)
 
@@ -49,6 +53,67 @@ Egress verification closes that gap by probing through `lease_account_http_clien
 
 - External IP check services add a runtime dependency → configurable URL and timeout; probe failures are non-fatal in `warn` mode.
 - Shared-IP detection is best-effort on last observed IPs → stale probes may false-negative until re-probed.
+- Account rows are already dense → the list uses only chip-level egress summary
+  while the detail section carries observed IP, checked time, probe error, and
+  proxy endpoint details.
+
+## Dashboard Presentation
+
+Composer should implement a small reusable egress chip mapper for the accounts
+frontend, then use it in both `AccountListItem` and `AccountProxySection`.
+
+Canonical primary chip labels:
+
+| Primary status | Label |
+|----------------|-------|
+| `ok` | `Egress OK` |
+| `unknown` or missing egress | `Egress unknown` |
+| `direct_egress` | `Direct egress` |
+| `shared_egress` | `Shared IP` |
+| `probe_failed` | `Probe failed` |
+
+Warning chip labels:
+
+| Warning | Label |
+|---------|-------|
+| `local_dns_risk` | `Local DNS risk` |
+
+Severity mapping:
+
+- `ok`: safe/green treatment.
+- `unknown`: neutral/gray outline treatment.
+- `direct_egress`: warning/amber treatment.
+- `shared_egress`: critical/red treatment.
+- `probe_failed`: critical/red treatment.
+- `local_dns_risk`: warning/amber secondary chip.
+
+Account list guidance:
+
+- Show the primary egress chip in the existing account list row, near the
+  account status badge or metadata row.
+- Show at most the compact warning chips needed to flag risk; do not render the
+  long explanatory warning text in the list.
+- Do not make the list chip an interactive nested control because the account
+  list item is already a button.
+- The chip row must wrap cleanly on narrow widths without hiding account status
+  or quota rows.
+
+Account detail guidance:
+
+- The `Network egress` section should show the same primary chip and warning
+  chips above the observed IP / checked-at / error details.
+- Keep `Verify egress`, proxy edit, and remove proxy actions in the section
+  header.
+- Long warning copy is allowed only in the detail section or tooltip, not in
+  the list row.
+- Failed probes must show `Probe failed` and error text, but must not show stale
+  observed IP.
+
+Accessibility:
+
+- Chip text must carry the status; color is supplementary.
+- Each chip should expose a useful `title` or tooltip/accessible label that
+  includes the status meaning and, when available, observed IP and checked time.
 
 ## Migration Plan
 

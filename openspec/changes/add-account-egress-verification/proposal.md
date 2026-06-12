@@ -7,7 +7,9 @@ Per-account proxy configuration proves SOCKS5 connectivity at save time, but ope
 - Add persisted egress probe results on each account (`egress_last_observed_ip`, timestamps, probe status/error).
 - Add an account-bound egress probe module that uses `lease_account_http_client(account_id)` (not the save-time proxy probe).
 - Add dashboard API endpoints to probe one account and report fleet-wide egress status with computed primary status (precedence: `probe_failed` > `shared_egress` > `direct_egress` > `ok` > `unknown`) and warnings (`local_dns_risk`).
-- Surface egress status inline on `AccountSummary` and in the accounts UI; failed probes clear stored observed IP (no stale values).
+- Surface egress status as compact dashboard chips on `AccountSummary` rows and
+  in the account network-egress detail section; failed probes clear stored
+  observed IP (no stale values).
 - Add normative settings: `account_egress_probe_enabled`, `account_egress_probe_url`, `account_egress_probe_timeout_seconds`, `account_egress_guardrail_mode`, `account_egress_allow_direct_accounts`, `account_egress_allow_shared_observed_ip`.
 - Add configurable guardrail mode (`off` / `warn` / `block`) with load-balancer filtering in `block` mode for selectable accounts only.
 - Require globally routable IPs (`ip.is_global`) from probe responses; reject RFC1918 and documentation/test-net addresses.
@@ -29,5 +31,6 @@ Per-account proxy configuration proves SOCKS5 connectivity at save time, but ope
 
 - Database: new nullable columns on `accounts`.
 - Backend: `app/core/clients/account_egress_probe.py`, accounts repository/service/API, settings, optional load-balancer filter.
-- Frontend: accounts schemas, API client, hooks, proxy/egress UI section.
+- Frontend: accounts schemas, API client, hooks, reusable egress status chip,
+  account-list inline chip, and proxy/egress detail section.
 - Tests: repository, probe unit, API integration, load-balancer (block mode), frontend schema/component tests.

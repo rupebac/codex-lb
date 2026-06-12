@@ -30,6 +30,10 @@ def test_account_proxy_columns_are_nullable_with_remote_dns_default_true() -> No
         "egress_last_observed_at",
         "egress_last_checked_at",
         "egress_last_probe_error",
+        "token_refresh_next_allowed_at",
+        "token_refresh_last_attempt_at",
+        "token_refresh_last_result",
+        "token_refresh_last_reason",
     )
     for column_name in nullable_proxy_columns:
         column = columns[column_name]
@@ -49,3 +53,18 @@ def test_account_proxy_columns_are_nullable_with_remote_dns_default_true() -> No
     assert egress_status.default is not None
     assert getattr(egress_status.default, "arg", egress_status.default) == "unknown"
     assert egress_status.server_default is not None
+
+
+def test_account_token_refresh_schedule_columns() -> None:
+    columns = Account.__table__.c
+    for column_name in (
+        "token_refresh_next_allowed_at",
+        "token_refresh_last_attempt_at",
+        "token_refresh_last_result",
+        "token_refresh_last_reason",
+    ):
+        assert columns[column_name].nullable is True
+
+    failure_count = columns["token_refresh_failure_count"]
+    assert failure_count.nullable is False
+    assert failure_count.server_default is not None

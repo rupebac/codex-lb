@@ -14583,7 +14583,7 @@ async def test_ensure_fresh_skips_token_refresh_admission_for_fresh_account(monk
     service = proxy_service.ProxyService(_repo_factory(_RequestLogsRecorder()))
     account = _make_account("acc_fresh_no_refresh")
 
-    async def fake_ensure_fresh(self, target, *, force: bool = False):
+    async def fake_ensure_fresh(self, target, *, force: bool = False, source: object = None):
         assert force is False
         return target
 

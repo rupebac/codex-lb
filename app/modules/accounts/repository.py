@@ -9,6 +9,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import DEFAULT_EMAIL
+from app.core.auth.token_refresh_scheduler import TokenRefreshScheduleUpdate, schedule_update_to_db_values
 from app.core.utils.time import utcnow
 from app.db.models import Account, AccountStatus, DashboardSettings, RequestLog, StickySession, UsageHistory
 
@@ -343,8 +344,9 @@ class AccountsRepository:
         plan_type: str | None = None,
         email: str | None = None,
         chatgpt_account_id: str | None = None,
+        token_refresh_schedule: TokenRefreshScheduleUpdate | None = None,
     ) -> bool:
-        values: dict[str, bytes | datetime | str] = {
+        values: dict[str, bytes | datetime | str | int | object] = {
             "access_token_encrypted": access_token_encrypted,
             "refresh_token_encrypted": refresh_token_encrypted,
             "id_token_encrypted": id_token_encrypted,
@@ -356,6 +358,22 @@ class AccountsRepository:
             values["email"] = email
         if chatgpt_account_id is not None:
             values["chatgpt_account_id"] = chatgpt_account_id
+        if token_refresh_schedule is not None:
+            values.update(schedule_update_to_db_values(token_refresh_schedule))
+        result = await self._session.execute(
+            update(Account).where(Account.id == account_id).values(**values).returning(Account.id)
+        )
+        await self._session.commit()
+        return result.scalar_one_or_none() is not None
+
+    async def update_token_refresh_schedule(
+        self,
+        account_id: str,
+        schedule: TokenRefreshScheduleUpdate,
+    ) -> bool:
+        values = schedule_update_to_db_values(schedule)
+        if not values:
+            return True
         result = await self._session.execute(
             update(Account).where(Account.id == account_id).values(**values).returning(Account.id)
         )

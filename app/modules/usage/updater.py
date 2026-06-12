@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Mapping, Protocol, cast
 
 from app.core.auth.refresh import RefreshError
+from app.core.auth.token_refresh_scheduler import TokenRefreshDeferred, TokenRefreshSource
 from app.core.balancer import PERMANENT_FAILURE_CODES, QUOTA_EXCEEDED_COOLDOWN_SECONDS
 from app.core.clients.account_http import invalidate_account_client
 from app.core.clients.usage import UsageFetchError, fetch_usage
@@ -327,7 +328,14 @@ class UsageUpdater:
                 _mark_usage_refresh_auth_cooldown(account.id, exc.status_code)
                 return AccountRefreshResult(usage_written=False, fetch_succeeded=False)
             try:
-                account = await self._auth_manager.ensure_fresh(account, force=True)
+                account = await self._auth_manager.ensure_fresh(
+                    account,
+                    force=True,
+                    source=TokenRefreshSource.USAGE_REFRESH_401,
+                )
+            except TokenRefreshDeferred:
+                _mark_usage_refresh_auth_cooldown(account.id, exc.status_code)
+                return AccountRefreshResult(usage_written=False, fetch_succeeded=False)
             except RefreshError:
                 _mark_usage_refresh_auth_cooldown(account.id, exc.status_code)
                 return AccountRefreshResult(usage_written=False, fetch_succeeded=False)

@@ -132,6 +132,16 @@ class Account(Base):
         nullable=False,
     )
     egress_last_probe_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_refresh_next_allowed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    token_refresh_last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    token_refresh_last_result: Mapped[str | None] = mapped_column(String, nullable=True)
+    token_refresh_last_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    token_refresh_failure_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default=text("0"),
+        nullable=False,
+    )
 
     api_key_assignments: Mapped[list["ApiKeyAccountAssignment"]] = relationship(
         "ApiKeyAccountAssignment",

@@ -152,6 +152,86 @@ Summary counts MUST be derived from the computed primary status values in `accou
 - **WHEN** an operator POSTs to `/api/accounts/{account_id}/egress/probe`
 - **THEN** the response includes observed IP (if any), checked time, configured proxy flag, primary status, warnings, and `shared_with_account_ids`
 
+### Requirement: Dashboard MUST present egress risk as compact chips
+
+The dashboard MUST present account egress status as compact status chips in
+existing account surfaces rather than as a separate dashboard card. The primary
+egress chip MUST be rendered from `AccountSummary.egress` in the account list
+row and in the account network-egress detail section. The account list MUST NOT
+perform an additional per-account egress request to render the chip.
+
+The primary chip label MUST use this mapping:
+
+| Status | Label |
+|--------|-------|
+| `ok` | `Egress OK` |
+| `unknown` or missing egress | `Egress unknown` |
+| `direct_egress` | `Direct egress` |
+| `shared_egress` | `Shared IP` |
+| `probe_failed` | `Probe failed` |
+
+Dashboard warning chips MUST use this mapping:
+
+| Warning | Label |
+|---------|-------|
+| `local_dns_risk` | `Local DNS risk` |
+
+The visual severity MUST be:
+
+- `ok`: safe/green
+- `unknown`: neutral/gray outline
+- `direct_egress`: warning/amber
+- `shared_egress`: critical/red
+- `probe_failed`: critical/red
+- `local_dns_risk`: warning/amber secondary chip
+
+Chip text MUST carry the state without relying on color alone. Each chip MUST
+provide an accessible label, `title`, or tooltip that explains the state; when
+available, the explanation SHOULD include observed IP and checked time.
+
+#### Scenario: Account list shows primary egress chip without extra fetches
+- **GIVEN** `AccountSummary.egress.status=shared_egress`
+- **AND** `AccountSummary.egress.warnings=["local_dns_risk"]`
+- **WHEN** the account list row renders
+- **THEN** it shows a primary chip labeled `Shared IP`
+- **AND** it shows a warning chip labeled `Local DNS risk`
+- **AND** it does not issue a separate egress report or probe request for that
+  row
+- **AND** the chips are not nested interactive controls inside the row button
+
+#### Scenario: Missing egress summary falls back to unknown chip
+- **GIVEN** an account summary has no `egress` object
+- **WHEN** the account list row renders
+- **THEN** it shows a primary chip labeled `Egress unknown`
+- **AND** it does not show observed IP text
+
+#### Scenario: Detail section reuses chip semantics and keeps details visible
+- **GIVEN** an account has `egress.status=direct_egress`
+- **AND** `egress.observed_ip=93.184.216.34`
+- **AND** `egress.checked_at` is present
+- **WHEN** the network-egress detail section renders
+- **THEN** it shows the primary chip labeled `Direct egress`
+- **AND** it shows the observed IP and checked time as detail text
+- **AND** it keeps the `Verify egress` action available
+
+#### Scenario: Failed probe chip does not show stale observed IP
+- **GIVEN** an account has `egress.status=probe_failed`
+- **AND** `egress.observed_ip` is null
+- **AND** `egress.error` is present
+- **WHEN** the account list and network-egress detail section render
+- **THEN** both surfaces show a primary chip labeled `Probe failed`
+- **AND** neither surface shows stale observed IP text
+- **AND** the detail section shows the probe error
+
+#### Scenario: Chips wrap without hiding account controls
+- **GIVEN** a narrow dashboard viewport
+- **AND** an account row contains account status, egress primary chip, and a
+  `Local DNS risk` warning chip
+- **WHEN** the row renders
+- **THEN** the chips wrap or truncate within their container
+- **AND** account status, quota rows, and selection behavior remain visible and
+  usable
+
 ### Requirement: Egress guardrail mode
 
 The service MUST honor `account_egress_guardrail_mode` (`off`, `warn`, `block`) and the allow flags defined in the settings requirement.

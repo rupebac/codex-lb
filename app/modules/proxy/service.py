@@ -34,6 +34,7 @@ from app.core.auth.refresh import (
     pop_token_refresh_timeout_override,
     push_token_refresh_timeout_override,
 )
+from app.core.auth.token_refresh_scheduler import TokenRefreshSource
 from app.core.balancer import (
     PERMANENT_FAILURE_CODES,
     TRAFFIC_CLASS_FOREGROUND,
@@ -11873,7 +11874,7 @@ class ProxyService:
                     acquire_refresh_admission=self._get_work_admission().acquire_token_refresh,
                     refresh_repo_factory=self._accounts_refresh_scope,
                 )
-                return await auth_manager.ensure_fresh(account, force=force)
+                return await auth_manager.ensure_fresh(account, force=force, source=TokenRefreshSource.LIVE_REQUEST)
         finally:
             pop_token_refresh_timeout_override(token)
 

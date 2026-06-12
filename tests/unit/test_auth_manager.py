@@ -3,13 +3,22 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
-from app.core.auth.refresh import RefreshError, TokenRefreshResult
+from app.core.auth.refresh import RefreshError, TokenRefreshResult, refresh_jitter_offset_seconds
+from app.core.auth.token_refresh_scheduler import (
+    BackgroundTokenRefreshPacer,
+    TokenRefreshDeferred,
+    TokenRefreshSource,
+    reset_background_token_refresh_pacer,
+    set_background_pacer_override,
+    set_scheduler_monotonic_override,
+    set_scheduler_now_override,
+)
 from app.core.crypto import TokenEncryptor
 from app.core.utils.time import utcnow
 from app.db.models import Account, AccountStatus
@@ -28,6 +37,8 @@ class _DummyRepo:
     def __init__(self) -> None:
         self.tokens_payload: dict[str, object] | None = None
         self.status_payload: dict[str, object] | None = None
+        self.schedule_payload: dict[str, object] | None = None
+        self.schedule_only_calls = 0
         self.accounts_by_id: dict[str, Account] = {}
 
     async def get_by_id(self, account_id: str) -> Account | None:
@@ -58,7 +69,10 @@ class _DummyRepo:
         plan_type: str | None = None,
         email: str | None = None,
         chatgpt_account_id: str | None = None,
+        token_refresh_schedule: object = None,
     ) -> bool:
+        from app.core.auth.token_refresh_scheduler import TokenRefreshScheduleUpdate, schedule_update_to_db_values
+
         self.tokens_payload = {
             "account_id": account_id,
             "access_token_encrypted": access_token_encrypted,
@@ -68,7 +82,24 @@ class _DummyRepo:
             "plan_type": plan_type,
             "email": email,
             "chatgpt_account_id": chatgpt_account_id,
+            "token_refresh_schedule": token_refresh_schedule,
         }
+        if isinstance(token_refresh_schedule, TokenRefreshScheduleUpdate):
+            self.schedule_payload = {
+                "account_id": account_id,
+                **schedule_update_to_db_values(token_refresh_schedule),
+            }
+        return True
+
+    async def update_token_refresh_schedule(self, account_id: str, schedule: object) -> bool:
+        from app.core.auth.token_refresh_scheduler import TokenRefreshScheduleUpdate, schedule_update_to_db_values
+
+        self.schedule_only_calls += 1
+        if isinstance(schedule, TokenRefreshScheduleUpdate):
+            self.schedule_payload = {
+                "account_id": account_id,
+                **schedule_update_to_db_values(schedule),
+            }
         return True
 
 
@@ -566,3 +597,295 @@ async def test_refresh_account_deactivates_when_upstream_returns_permanent_sessi
     reason = repo.status_payload["deactivation_reason"]
     assert isinstance(reason, str)
     assert "re-login" in reason.lower() or "expired" in reason.lower()
+
+
+@pytest.fixture(autouse=True)
+def _reset_token_refresh_scheduler_state() -> None:
+    set_scheduler_now_override(None)
+    set_scheduler_monotonic_override(None)
+    set_background_pacer_override(None)
+    reset_background_token_refresh_pacer()
+
+
+def _stale_account(account_id: str) -> Account:
+    encryptor = TokenEncryptor()
+    return Account(
+        id=account_id,
+        email="user@example.com",
+        plan_type="plus",
+        access_token_encrypted=encryptor.encrypt("access-old"),
+        refresh_token_encrypted=encryptor.encrypt("refresh-old"),
+        id_token_encrypted=encryptor.encrypt("id-old"),
+        last_refresh=utcnow().replace(year=utcnow().year - 1),
+        status=AccountStatus.ACTIVE,
+        deactivation_reason=None,
+        token_refresh_failure_count=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_fresh_live_request_bypasses_background_pacer(monkeypatch) -> None:
+    pacer_acquires = 0
+
+    class _TrackingPacer(BackgroundTokenRefreshPacer):
+        async def acquire(self):  # type: ignore[override]
+            nonlocal pacer_acquires
+            pacer_acquires += 1
+            return await super().acquire()
+
+    set_background_pacer_override(_TrackingPacer(concurrency=1, min_start_spacing_seconds=300.0))
+
+    async def _fake_refresh(_: str, *, account_id: str | None = None) -> TokenRefreshResult:
+        return TokenRefreshResult(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            id_token="new-id",
+            account_id=account_id,
+            plan_type="plus",
+            email=None,
+        )
+
+    monkeypatch.setattr(auth_manager_module, "refresh_access_token", _fake_refresh)
+    repo = _DummyRepo()
+    manager = AuthManager(cast(AccountsRepositoryPort, repo))
+    account = _stale_account("acc_live_bypass")
+
+    await manager.ensure_fresh(account, force=True, source=TokenRefreshSource.LIVE_REQUEST)
+
+    assert pacer_acquires == 0
+    assert repo.schedule_payload is not None
+    assert repo.schedule_payload["token_refresh_last_result"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_ensure_fresh_background_defers_when_schedule_not_due(monkeypatch) -> None:
+    now = utcnow()
+    set_scheduler_now_override(now)
+    account = _stale_account("acc_bg_defer")
+    account.last_refresh = now - timedelta(days=1)
+    account.token_refresh_next_allowed_at = now.replace(year=now.year + 1)
+
+    repo = _DummyRepo()
+    manager = AuthManager(cast(AccountsRepositoryPort, repo))
+
+    with pytest.raises(TokenRefreshDeferred):
+        await manager.ensure_fresh(account, force=True, source=TokenRefreshSource.USAGE_REFRESH_401)
+
+
+@pytest.mark.asyncio
+async def test_ensure_fresh_background_records_transient_failure_backoff(monkeypatch) -> None:
+    now = utcnow()
+    set_scheduler_now_override(now)
+    account = _stale_account("acc_bg_fail")
+    account.token_refresh_next_allowed_at = now.replace(year=now.year - 1)
+
+    async def _fake_refresh(_: str, *, account_id: str | None = None) -> TokenRefreshResult:
+        raise RefreshError("transport_error", "temporary", False, transport_error=True)
+
+    monkeypatch.setattr(auth_manager_module, "refresh_access_token", _fake_refresh)
+    set_background_pacer_override(BackgroundTokenRefreshPacer(concurrency=1, min_start_spacing_seconds=0.0))
+
+    repo = _DummyRepo()
+    manager = AuthManager(cast(AccountsRepositoryPort, repo))
+
+    with pytest.raises(RefreshError):
+        await manager.ensure_fresh(account, force=True, source=TokenRefreshSource.USAGE_REFRESH_401)
+
+    assert repo.schedule_payload is not None
+    assert repo.schedule_payload["token_refresh_last_result"] == "failure"
+    assert repo.schedule_payload["token_refresh_failure_count"] == 1
+    assert repo.schedule_payload["token_refresh_next_allowed_at"] is not None
+    assert repo.schedule_payload["token_refresh_next_allowed_at"] > now
+
+
+@pytest.mark.asyncio
+async def test_ensure_fresh_background_singleflights_before_pacer_wait(monkeypatch) -> None:
+    now = utcnow()
+    set_scheduler_now_override(now)
+    set_background_pacer_override(BackgroundTokenRefreshPacer(concurrency=1, min_start_spacing_seconds=0.0))
+    started = asyncio.Event()
+    release = asyncio.Event()
+    refresh_calls = 0
+
+    async def _fake_refresh(_: str, *, account_id: str | None = None) -> TokenRefreshResult:
+        nonlocal refresh_calls
+        refresh_calls += 1
+        started.set()
+        await release.wait()
+        return TokenRefreshResult(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            id_token="new-id",
+            account_id=account_id,
+            plan_type="plus",
+            email=None,
+        )
+
+    monkeypatch.setattr(auth_manager_module, "refresh_access_token", _fake_refresh)
+    repo = _DummyRepo()
+    manager = AuthManager(cast(AccountsRepositoryPort, repo))
+    account = _stale_account("acc_bg_singleflight")
+    account.token_refresh_next_allowed_at = now - timedelta(seconds=1)
+
+    first = asyncio.create_task(manager.ensure_fresh(account, force=True, source=TokenRefreshSource.USAGE_REFRESH_401))
+    await started.wait()
+    second = asyncio.create_task(manager.ensure_fresh(account, force=True, source=TokenRefreshSource.USAGE_REFRESH_401))
+    await asyncio.sleep(0)
+
+    release.set()
+    await asyncio.gather(first, second)
+
+    assert refresh_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_ensure_fresh_success_persists_schedule_atomically_with_tokens(monkeypatch) -> None:
+    async def _fake_refresh(_: str, *, account_id: str | None = None) -> TokenRefreshResult:
+        return TokenRefreshResult(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            id_token="new-id",
+            account_id=account_id,
+            plan_type="plus",
+            email=None,
+        )
+
+    monkeypatch.setattr(auth_manager_module, "refresh_access_token", _fake_refresh)
+    set_background_pacer_override(BackgroundTokenRefreshPacer(concurrency=1, min_start_spacing_seconds=0.0))
+
+    repo = _DummyRepo()
+    manager = AuthManager(cast(AccountsRepositoryPort, repo))
+    account = _stale_account("acc_atomic")
+
+    await manager.ensure_fresh(account, force=True, source=TokenRefreshSource.LIVE_REQUEST)
+
+    assert repo.tokens_payload is not None
+    assert repo.tokens_payload["token_refresh_schedule"] is not None
+    assert repo.schedule_payload is not None
+    assert repo.schedule_payload["token_refresh_last_result"] == "success"
+    assert repo.schedule_payload["token_refresh_last_reason"] == "live_request"
+    assert repo.schedule_only_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_ensure_fresh_live_request_skips_refresh_when_not_due(monkeypatch) -> None:
+    refresh_calls = 0
+
+    async def _fake_refresh(_: str, *, account_id: str | None = None) -> TokenRefreshResult:
+        nonlocal refresh_calls
+        refresh_calls += 1
+        return TokenRefreshResult(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            id_token="new-id",
+            account_id=account_id,
+            plan_type="plus",
+            email=None,
+        )
+
+    monkeypatch.setattr(auth_manager_module, "refresh_access_token", _fake_refresh)
+    repo = _DummyRepo()
+    manager = AuthManager(cast(AccountsRepositoryPort, repo))
+    account = _stale_account("acc_fresh")
+    account.last_refresh = utcnow()
+
+    result = await manager.ensure_fresh(account, source=TokenRefreshSource.LIVE_REQUEST)
+
+    assert refresh_calls == 0
+    assert result.id == account.id
+    assert repo.tokens_payload is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_fresh_live_request_does_not_rewrite_existing_schedule_when_not_due(monkeypatch) -> None:
+    refresh_calls = 0
+    now = utcnow()
+
+    async def _fake_refresh(_: str, *, account_id: str | None = None) -> TokenRefreshResult:
+        nonlocal refresh_calls
+        refresh_calls += 1
+        return TokenRefreshResult(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            id_token="new-id",
+            account_id=account_id,
+            plan_type="plus",
+            email=None,
+        )
+
+    monkeypatch.setattr(auth_manager_module, "refresh_access_token", _fake_refresh)
+    repo = _DummyRepo()
+    manager = AuthManager(cast(AccountsRepositoryPort, repo))
+    account = _stale_account("acc_fresh_existing_schedule")
+    account.last_refresh = now
+    account.token_refresh_next_allowed_at = now + timedelta(days=1)
+
+    result = await manager.ensure_fresh(account, source=TokenRefreshSource.LIVE_REQUEST)
+
+    assert refresh_calls == 0
+    assert result.id == account.id
+    assert repo.tokens_payload is None
+    assert repo.schedule_only_calls == 0
+    assert repo.schedule_payload is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_fresh_background_returns_scheduled_account_when_not_forced(monkeypatch) -> None:
+    refresh_calls = 0
+    now = utcnow()
+    set_scheduler_now_override(now)
+
+    async def _fake_refresh(_: str, *, account_id: str | None = None) -> TokenRefreshResult:
+        nonlocal refresh_calls
+        refresh_calls += 1
+        return TokenRefreshResult(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            id_token="new-id",
+            account_id=account_id,
+            plan_type="plus",
+            email=None,
+        )
+
+    monkeypatch.setattr(auth_manager_module, "refresh_access_token", _fake_refresh)
+    repo = _DummyRepo()
+    manager = AuthManager(cast(AccountsRepositoryPort, repo))
+    account = _stale_account("acc_bg_scheduled")
+    offset_seconds = refresh_jitter_offset_seconds(account.id, jitter_hours=18.0)
+    account.last_refresh = now - timedelta(days=8) + timedelta(seconds=offset_seconds - 1)
+    account.token_refresh_next_allowed_at = now + timedelta(hours=1)
+
+    result = await manager.ensure_fresh(account, source=TokenRefreshSource.STARTUP)
+
+    assert refresh_calls == 0
+    assert result.id == account.id
+    assert repo.tokens_payload is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_fresh_background_returns_fresh_account_without_defer(monkeypatch) -> None:
+    refresh_calls = 0
+
+    async def _fake_refresh(_: str, *, account_id: str | None = None) -> TokenRefreshResult:
+        nonlocal refresh_calls
+        refresh_calls += 1
+        return TokenRefreshResult(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            id_token="new-id",
+            account_id=account_id,
+            plan_type="plus",
+            email=None,
+        )
+
+    monkeypatch.setattr(auth_manager_module, "refresh_access_token", _fake_refresh)
+    repo = _DummyRepo()
+    manager = AuthManager(cast(AccountsRepositoryPort, repo))
+    account = _stale_account("acc_bg_fresh")
+    account.last_refresh = utcnow()
+
+    result = await manager.ensure_fresh(account, source=TokenRefreshSource.STARTUP)
+
+    assert refresh_calls == 0
+    assert result.id == account.id
+    assert repo.tokens_payload is None

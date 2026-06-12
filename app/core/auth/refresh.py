@@ -51,6 +51,41 @@ class RefreshError(Exception):
         self.transport_error = transport_error
 
 
+def refresh_interval_effective(*, account_id: str | None = None) -> timedelta:
+    """Return the per-account effective refresh interval before hard max age."""
+
+    settings = get_settings()
+    interval_days = settings.token_refresh_interval_days or TOKEN_REFRESH_INTERVAL_DAYS
+    base = timedelta(days=interval_days)
+    if account_id:
+        jitter_hours = float(settings.account_token_refresh_jitter_hours)
+        offset_seconds = refresh_jitter_offset_seconds(account_id, jitter_hours)
+        effective = base - timedelta(seconds=offset_seconds)
+    else:
+        effective = base
+    # Defense in depth against a misconfigured ``jitter_hours`` (the
+    # setting is bounded ``le=96`` against an 8-day default base, but
+    # operators running custom ``token_refresh_interval_days`` values
+    # could still produce a negative effective duration). A negative
+    # ``effective`` would make every eligibility check pass, triggering
+    # an OAuth refresh on every request. Floor at one hour so a
+    # misconfiguration degrades to "refresh hourly" rather than a storm.
+    if effective < timedelta(hours=1):
+        effective = timedelta(hours=1)
+    return effective
+
+
+def next_refresh_eligible_at(
+    last_refresh: datetime,
+    *,
+    account_id: str | None = None,
+) -> datetime:
+    """Return the earliest wall-clock time this account becomes refresh-eligible."""
+
+    last = to_utc_naive(last_refresh)
+    return last + refresh_interval_effective(account_id=account_id)
+
+
 def should_refresh(
     last_refresh: datetime,
     now: datetime | None = None,
@@ -71,31 +106,11 @@ def should_refresh(
     interval is used.
     """
 
-    settings = get_settings()
     current = to_utc_naive(now) if now is not None else utcnow()
-    last = to_utc_naive(last_refresh)
-    interval_days = settings.token_refresh_interval_days or TOKEN_REFRESH_INTERVAL_DAYS
-    base = timedelta(days=interval_days)
-    if account_id:
-        jitter_hours = float(settings.account_token_refresh_jitter_hours)
-        offset_seconds = _refresh_jitter_offset_seconds(account_id, jitter_hours)
-        effective = base - timedelta(seconds=offset_seconds)
-    else:
-        effective = base
-    # Defense in depth against a misconfigured ``jitter_hours`` (the
-    # setting is bounded ``le=96`` against an 8-day default base, but
-    # operators running custom ``token_refresh_interval_days`` values
-    # could still produce a negative effective duration). A negative
-    # ``effective`` would make ``current - last > effective`` always
-    # True, triggering an OAuth refresh on every request. Floor at
-    # one hour so a misconfiguration degrades to "refresh hourly"
-    # rather than a refresh storm.
-    if effective < timedelta(hours=1):
-        effective = timedelta(hours=1)
-    return current - last > effective
+    return current > next_refresh_eligible_at(last_refresh, account_id=account_id)
 
 
-def _refresh_jitter_offset_seconds(account_id: str, jitter_hours: float) -> float:
+def refresh_jitter_offset_seconds(account_id: str, jitter_hours: float) -> float:
     """Return a stable offset in ``[0, jitter_hours*3600]``.
 
     The offset is derived from ``SHA-256(salt || account_id)`` so it is:
