@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { buildSettingsUpdateRequest } from "@/features/settings/payload";
+import { ROUTING_STRATEGY_OPTIONS } from "@/features/settings/routing-strategies";
 import type { DashboardSettings, SettingsUpdateRequest } from "@/features/settings/schemas";
 
 const LIMIT_WARMUP_MODEL_MAX_LENGTH = 128;
@@ -33,6 +34,7 @@ export function RoutingSettings({ settings, busy, onSave }: RoutingSettingsProps
   const [relativeAvailabilityTopK, setRelativeAvailabilityTopK] = useState(
     String(settings.relativeAvailabilityTopK),
   );
+  const [singleAccountId, setSingleAccountId] = useState(settings.singleAccountId ?? "");
   const [limitWarmupModel, setLimitWarmupModel] = useState(settings.limitWarmupModel);
   const [limitWarmupPrompt, setLimitWarmupPrompt] = useState(settings.limitWarmupPrompt);
   const [limitWarmupCooldown, setLimitWarmupCooldown] = useState(String(settings.limitWarmupCooldownSeconds));
@@ -74,6 +76,11 @@ export function RoutingSettings({ settings, busy, onSave }: RoutingSettingsProps
     relativeAvailabilityTopKValid && parsedRelativeAvailabilityTopK !== settings.relativeAvailabilityTopK;
 
   const relativeAvailabilitySelected = settings.routingStrategy === "relative_availability";
+  const singleAccountSelected = settings.routingStrategy === "single_account";
+  const singleAccountIdTrimmed = singleAccountId.trim();
+  const normalizedSingleAccountId = singleAccountIdTrimmed || null;
+  const singleAccountIdChanged = normalizedSingleAccountId !== (settings.singleAccountId ?? null);
+  const singleAccountIdValid = singleAccountIdTrimmed.length <= 255;
 
   return (
     <section className="rounded-xl border bg-card p-5">
@@ -104,7 +111,7 @@ export function RoutingSettings({ settings, busy, onSave }: RoutingSettingsProps
                 save({ upstreamStreamTransport: value as "default" | "auto" | "http" | "websocket" })
               }
             >
-              <SelectTrigger className="h-8 w-44 text-xs" disabled={busy}>
+              <SelectTrigger aria-label="Upstream stream transport" className="h-8 w-44 text-xs" disabled={busy}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent align="end">
@@ -129,14 +136,15 @@ export function RoutingSettings({ settings, busy, onSave }: RoutingSettingsProps
                 })
               }
             >
-              <SelectTrigger className="h-8 w-48 text-xs" disabled={busy}>
+              <SelectTrigger aria-label="Routing strategy" className="h-8 w-56 text-xs" disabled={busy}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent align="end">
-                <SelectItem value="capacity_weighted">Capacity weighted</SelectItem>
-                <SelectItem value="relative_availability">Relative availability</SelectItem>
-                <SelectItem value="usage_weighted">Usage weighted</SelectItem>
-                <SelectItem value="round_robin">Round robin</SelectItem>
+                {ROUTING_STRATEGY_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -218,6 +226,40 @@ export function RoutingSettings({ settings, busy, onSave }: RoutingSettingsProps
                 </div>
               </div>
             </>
+          ) : null}
+
+          {singleAccountSelected ? (
+            <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">Single account ID</p>
+                <p className="text-xs text-muted-foreground">Route eligible requests only to this account.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label="Single account ID"
+                  value={singleAccountId}
+                  maxLength={255}
+                  disabled={busy}
+                  onChange={(event) => setSingleAccountId(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && singleAccountIdChanged && singleAccountIdValid) {
+                      void save({ singleAccountId: normalizedSingleAccountId });
+                    }
+                  }}
+                  className="h-8 w-56 text-xs"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs"
+                  disabled={busy || !singleAccountIdChanged || !singleAccountIdValid}
+                  onClick={() => void save({ singleAccountId: normalizedSingleAccountId })}
+                >
+                  Save account
+                </Button>
+              </div>
+            </div>
           ) : null}
 
           <div className="flex items-center justify-between p-3">

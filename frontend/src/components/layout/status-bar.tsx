@@ -6,12 +6,13 @@ import { getDashboardOverview } from "@/features/dashboard/api";
 import { DEFAULT_OVERVIEW_TIMEFRAME } from "@/features/dashboard/schemas";
 import { getRuntimeVersion } from "@/features/runtime/api";
 import { getSettings } from "@/features/settings/api";
+import type { DashboardSettings } from "@/features/settings/schemas";
 import { formatTimeLong } from "@/utils/formatters";
 
 const GITHUB_REPOSITORY_URL = "https://github.com/soju06/codex-lb";
 
 function getRoutingLabel(
-  strategy: "usage_weighted" | "round_robin" | "capacity_weighted" | "relative_availability",
+  strategy: DashboardSettings["routingStrategy"],
   sticky: boolean,
   preferEarlier: boolean,
 ): string {
@@ -26,6 +27,18 @@ function getRoutingLabel(
   }
   if (strategy === "relative_availability") {
     return sticky ? "Relative availability + Sticky threads" : "Relative availability";
+  }
+  if (strategy === "fill_first") {
+    return sticky ? "Fill first + Sticky threads" : "Fill first";
+  }
+  if (strategy === "sequential_drain") {
+    return sticky ? "Sequential drain + Sticky threads" : "Sequential drain";
+  }
+  if (strategy === "reset_drain") {
+    return sticky ? "Reset drain + Sticky threads" : "Reset drain";
+  }
+  if (strategy === "single_account") {
+    return sticky ? "Single account + Sticky threads" : "Single account";
   }
   if (sticky && preferEarlier) return "Sticky + Early reset";
   if (sticky) return "Sticky threads";

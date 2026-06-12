@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { RoutingSettings } from "@/features/settings/components/routing-settings";
+import { ROUTING_STRATEGY_OPTIONS } from "@/features/settings/routing-strategies";
 import type { DashboardSettings } from "@/features/settings/schemas";
 
 const LIMIT_WARMUP_DEFAULTS = {
@@ -21,6 +22,7 @@ const BASE_SETTINGS: DashboardSettings = {
   routingStrategy: "usage_weighted",
   relativeAvailabilityPower: 2,
   relativeAvailabilityTopK: 5,
+  singleAccountId: null,
   openaiCacheAffinityMaxAgeSeconds: 300,
   dashboardSessionTtlSeconds: 43200,
   importWithoutOverwrite: false,
@@ -30,7 +32,65 @@ const BASE_SETTINGS: DashboardSettings = {
   ...LIMIT_WARMUP_DEFAULTS,
 };
 
+const ROUTING_STRATEGY_LABELS = [
+  "Capacity weighted",
+  "Relative availability",
+  "Fill first",
+  "Sequential drain",
+  "Reset drain",
+  "Single account",
+  "Usage weighted",
+  "Round robin",
+];
+
 describe("RoutingSettings", () => {
+  it("defines every backend-supported routing strategy for the dropdown", () => {
+    expect(ROUTING_STRATEGY_OPTIONS.map((option) => option.label)).toEqual(ROUTING_STRATEGY_LABELS);
+    expect(ROUTING_STRATEGY_OPTIONS.map((option) => option.value)).toEqual([
+      "capacity_weighted",
+      "relative_availability",
+      "fill_first",
+      "sequential_drain",
+      "reset_drain",
+      "single_account",
+      "usage_weighted",
+      "round_robin",
+    ]);
+  });
+
+  it("saves the single-account target when single-account routing is selected", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <RoutingSettings
+        settings={{ ...BASE_SETTINGS, routingStrategy: "single_account", singleAccountId: "acc-old" }}
+        busy={false}
+        onSave={onSave}
+      />,
+    );
+
+    const accountInput = screen.getByRole("textbox", { name: "Single account ID" });
+    await user.clear(accountInput);
+    await user.type(accountInput, "acc-new");
+    await user.click(screen.getByRole("button", { name: "Save account" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      stickyThreadsEnabled: false,
+      upstreamStreamTransport: "default",
+      preferEarlierResetAccounts: true,
+      routingStrategy: "single_account",
+      relativeAvailabilityPower: 2,
+      relativeAvailabilityTopK: 5,
+      singleAccountId: "acc-new",
+      openaiCacheAffinityMaxAgeSeconds: 300,
+      dashboardSessionTtlSeconds: 43200,
+      importWithoutOverwrite: false,
+      totpRequiredOnLogin: false,
+      apiKeyAuthEnabled: true,
+      ...LIMIT_WARMUP_DEFAULTS,
+    });
+  });
+
   it("saves a new prompt-cache affinity ttl from the button and Enter key", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue(undefined);
@@ -50,6 +110,7 @@ describe("RoutingSettings", () => {
       routingStrategy: "usage_weighted",
       relativeAvailabilityPower: 2,
       relativeAvailabilityTopK: 5,
+      singleAccountId: null,
       openaiCacheAffinityMaxAgeSeconds: 180,
       dashboardSessionTtlSeconds: 43200,
       importWithoutOverwrite: false,
@@ -76,6 +137,7 @@ describe("RoutingSettings", () => {
       routingStrategy: "usage_weighted",
       relativeAvailabilityPower: 2,
       relativeAvailabilityTopK: 5,
+      singleAccountId: null,
       openaiCacheAffinityMaxAgeSeconds: 240,
       dashboardSessionTtlSeconds: 43200,
       importWithoutOverwrite: false,
@@ -107,6 +169,7 @@ describe("RoutingSettings", () => {
       routingStrategy: "usage_weighted",
       relativeAvailabilityPower: 2,
       relativeAvailabilityTopK: 5,
+      singleAccountId: null,
       openaiCacheAffinityMaxAgeSeconds: 300,
       dashboardSessionTtlSeconds: 43200,
       importWithoutOverwrite: false,
@@ -137,6 +200,7 @@ describe("RoutingSettings", () => {
       routingStrategy: "relative_availability",
       relativeAvailabilityPower: 1.5,
       relativeAvailabilityTopK: 5,
+      singleAccountId: null,
       openaiCacheAffinityMaxAgeSeconds: 300,
       dashboardSessionTtlSeconds: 43200,
       importWithoutOverwrite: false,
@@ -176,6 +240,7 @@ describe("RoutingSettings", () => {
       routingStrategy: "relative_availability",
       relativeAvailabilityPower: 2,
       relativeAvailabilityTopK: 6,
+      singleAccountId: null,
       openaiCacheAffinityMaxAgeSeconds: 300,
       dashboardSessionTtlSeconds: 43200,
       importWithoutOverwrite: false,

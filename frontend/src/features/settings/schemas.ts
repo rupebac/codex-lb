@@ -5,6 +5,10 @@ export const RoutingStrategySchema = z.enum([
   "round_robin",
   "capacity_weighted",
   "relative_availability",
+  "fill_first",
+  "sequential_drain",
+  "reset_drain",
+  "single_account",
 ]);
 export const UpstreamStreamTransportSchema = z.enum(["default", "auto", "http", "websocket"]);
 export const LimitWarmupWindowsSchema = z.enum(["primary", "secondary", "both"]);
@@ -18,6 +22,7 @@ export const DashboardSettingsSchema = z.object({
   routingStrategy: RoutingStrategySchema.optional().default("usage_weighted"),
   relativeAvailabilityPower: z.number().positive().optional().default(2),
   relativeAvailabilityTopK: z.number().int().min(1).max(20).optional().default(5),
+  singleAccountId: z.string().nullable().optional().default(null),
   openaiCacheAffinityMaxAgeSeconds: z.number().int().positive().optional().default(300),
   dashboardSessionTtlSeconds: z.number().int().min(3600).optional().default(43200),
   importWithoutOverwrite: z.boolean(),
@@ -39,6 +44,7 @@ export const SettingsUpdateRequestSchema = z.object({
   routingStrategy: RoutingStrategySchema.optional(),
   relativeAvailabilityPower: z.number().positive().optional(),
   relativeAvailabilityTopK: z.number().int().min(1).max(20).optional(),
+  singleAccountId: z.string().max(255).nullable().optional(),
   openaiCacheAffinityMaxAgeSeconds: z.number().int().positive().optional(),
   dashboardSessionTtlSeconds: z.number().int().min(3600).optional(),
   importWithoutOverwrite: z.boolean().optional(),

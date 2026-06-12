@@ -14,6 +14,7 @@ describe("DashboardSettingsSchema", () => {
       routingStrategy: "relative_availability",
       relativeAvailabilityPower: 2,
       relativeAvailabilityTopK: 5,
+      singleAccountId: null,
       openaiCacheAffinityMaxAgeSeconds: 300,
       dashboardSessionTtlSeconds: 43200,
       importWithoutOverwrite: true,
@@ -33,6 +34,7 @@ describe("DashboardSettingsSchema", () => {
     expect(parsed.routingStrategy).toBe("relative_availability");
     expect(parsed.relativeAvailabilityPower).toBe(2);
     expect(parsed.relativeAvailabilityTopK).toBe(5);
+    expect(parsed.singleAccountId).toBeNull();
     expect(parsed.openaiCacheAffinityMaxAgeSeconds).toBe(300);
     expect(parsed.dashboardSessionTtlSeconds).toBe(43200);
     expect(parsed.importWithoutOverwrite).toBe(true);
@@ -53,6 +55,7 @@ describe("DashboardSettingsSchema", () => {
 
     expect(parsed.upstreamStreamTransport).toBe("default");
     expect(parsed.routingStrategy).toBe("usage_weighted");
+    expect(parsed.singleAccountId).toBeNull();
     expect(parsed.openaiCacheAffinityMaxAgeSeconds).toBe(300);
     expect(parsed.limitWarmupEnabled).toBe(false);
     expect(parsed.limitWarmupWindows).toBe("both");
@@ -69,9 +72,10 @@ describe("SettingsUpdateRequestSchema", () => {
       stickyThreadsEnabled: false,
       upstreamStreamTransport: "websocket",
       preferEarlierResetAccounts: true,
-      routingStrategy: "relative_availability",
+      routingStrategy: "single_account",
       relativeAvailabilityPower: 1.5,
       relativeAvailabilityTopK: 7,
+      singleAccountId: "acc-main",
       openaiCacheAffinityMaxAgeSeconds: 120,
       dashboardSessionTtlSeconds: 7200,
       importWithoutOverwrite: true,
@@ -89,9 +93,10 @@ describe("SettingsUpdateRequestSchema", () => {
     expect(parsed.dashboardSessionTtlSeconds).toBe(7200);
     expect(parsed.upstreamStreamTransport).toBe("websocket");
     expect(parsed.importWithoutOverwrite).toBe(true);
-    expect(parsed.routingStrategy).toBe("relative_availability");
+    expect(parsed.routingStrategy).toBe("single_account");
     expect(parsed.relativeAvailabilityPower).toBe(1.5);
     expect(parsed.relativeAvailabilityTopK).toBe(7);
+    expect(parsed.singleAccountId).toBe("acc-main");
     expect(parsed.totpRequiredOnLogin).toBe(true);
     expect(parsed.apiKeyAuthEnabled).toBe(false);
     expect(parsed.limitWarmupEnabled).toBe(true);
