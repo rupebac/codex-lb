@@ -72,3 +72,40 @@ async def test_probe_account_egress_ip_classifies_http_errors() -> None:
 
     assert result.ok is False
     assert result.error == "probe_http_503"
+
+@pytest.mark.asyncio
+async def test_probe_account_egress_ip_uses_account_bound_http_client(monkeypatch) -> None:
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock, MagicMock
+
+    captured: dict[str, str] = {}
+
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    mock_response.text = AsyncMock(return_value='{"ip":"93.184.216.34"}')
+    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = AsyncMock(return_value=None)
+
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(return_value=mock_response)
+
+    mock_client = MagicMock()
+    mock_client.session = mock_session
+
+    @asynccontextmanager
+    async def fake_lease(account_id: str):
+        captured["account_id"] = account_id
+        yield mock_client
+
+    monkeypatch.setattr(egress_probe_module, "lease_account_http_client", fake_lease)
+    egress_probe_module._set_http_get_for_test(None)
+    try:
+        result = await probe_account_egress_ip("acc_lease")
+    finally:
+        egress_probe_module._set_http_get_for_test(None)
+
+    assert captured["account_id"] == "acc_lease"
+    assert result.ok is True
+    assert result.observed_ip == "93.184.216.34"
+    mock_session.get.assert_called_once()
+

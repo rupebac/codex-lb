@@ -102,7 +102,7 @@ export const AccountEgressStatusSchema = z.object({
   checkedAt: z.string().datetime({ offset: true }).nullable().optional(),
   error: z.string().nullable().optional(),
   configuredProxy: z.boolean().default(false),
-  proxyRemoteDns: z.boolean().default(true),
+  proxyRemoteDns: z.boolean().nullable().optional(),
   sharedWithAccountIds: z.array(z.string()).default([]),
   warnings: z.array(z.string()).default([]),
 });

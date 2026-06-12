@@ -5,10 +5,10 @@ import { AccountCards } from "@/features/dashboard/components/account-cards";
 import { createAccountSummary } from "@/test/mocks/factories";
 
 describe("AccountCards", () => {
-  it("caps the dashboard account grid at two visible rows without clipping taller cards", () => {
+  it("renders every account at once without capping height or scrolling", () => {
     render(
       <AccountCards
-        accounts={Array.from({ length: 7 }, (_, index) =>
+        accounts={Array.from({ length: 18 }, (_, index) =>
           createAccountSummary({
             accountId: `acc-${index + 1}`,
             email: `account-${index + 1}@example.com`,
@@ -19,24 +19,14 @@ describe("AccountCards", () => {
       />,
     );
 
-    expect(screen.getByTestId("dashboard-account-cards")).toHaveStyle({
-      maxHeight: "calc(2 * 11.5rem + 1rem)",
-    });
-  });
-
-  it("keeps the scrollbar hidden on the dashboard account grid", () => {
-    render(
-      <AccountCards
-        accounts={[createAccountSummary(), createAccountSummary({ accountId: "acc-2", email: "two@example.com" })]}
-        onAction={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByTestId("dashboard-account-cards")).toHaveClass(
-      "overflow-y-auto",
-      "[scrollbar-width:none]",
-      "[&::-webkit-scrollbar]:hidden",
-    );
+    const grid = screen.getByTestId("dashboard-account-cards");
+    // Every account is mounted (no virtualisation / no clipping window).
+    for (let index = 1; index <= 18; index += 1) {
+      expect(screen.getByText(`Account ${index}`)).toBeInTheDocument();
+    }
+    // The grid must not impose a scroll cap on the accounts section.
+    expect(grid).not.toHaveClass("overflow-y-auto");
+    expect(grid.style.maxHeight).toBe("");
   });
 
   it("gives each warm-up toggle a descriptive account-specific name", () => {

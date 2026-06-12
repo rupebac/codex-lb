@@ -119,4 +119,70 @@ describe("AccountListItem", () => {
 
     expect(screen.getByTestId("mini-quota-track-weekly-fill")).toHaveStyle({ width: "73%" });
   });
+
+  it("renders compact egress chips without an extra list row", () => {
+    const account = createAccountSummary({
+      egress: {
+        accountId: "acc_primary",
+        status: "shared_egress",
+        observedIp: "203.0.113.10",
+        configuredProxy: true,
+        proxyRemoteDns: true,
+        sharedWithAccountIds: ["acc_other"],
+        warnings: ["local_dns_risk"],
+      },
+    });
+
+    const { container } = render(<AccountListItem account={account} selected={false} onSelect={vi.fn()} />);
+
+    expect(screen.getByTestId("account-list-egress-chip")).toHaveTextContent("Shared IP");
+    expect(screen.getByTestId("egress-warning-chip-local_dns_risk")).toHaveTextContent("Local DNS risk");
+    expect(screen.getByTestId("egress-status-chips")).toHaveClass("flex-wrap");
+    expect(container.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  it("falls back to egress unknown when summary egress is missing", () => {
+    const account = createAccountSummary({ egress: undefined });
+
+    render(<AccountListItem account={account} selected={false} onSelect={vi.fn()} />);
+
+    expect(screen.getByTestId("account-list-egress-chip")).toHaveTextContent("Egress unknown");
+  });
+
+  it("omits egress chips for direct accounts with unknown status", () => {
+    const account = createAccountSummary({
+      egress: {
+        accountId: "acc_primary",
+        status: "unknown",
+        configuredProxy: false,
+        sharedWithAccountIds: [],
+        warnings: [],
+      },
+    });
+
+    render(<AccountListItem account={account} selected={false} onSelect={vi.fn()} />);
+
+    expect(screen.queryByTestId("account-list-egress-chip")).not.toBeInTheDocument();
+    expect(screen.getByText("Warm-up off")).toBeInTheDocument();
+  });
+
+  it("does not show observed IP text in the account list chips", () => {
+    const account = createAccountSummary({
+      egress: {
+        accountId: "acc_primary",
+        status: "probe_failed",
+        observedIp: "93.184.216.34",
+        error: "timeout",
+        configuredProxy: false,
+        proxyRemoteDns: true,
+        sharedWithAccountIds: [],
+        warnings: [],
+      },
+    });
+
+    render(<AccountListItem account={account} selected={false} onSelect={vi.fn()} />);
+
+    expect(screen.getByTestId("account-list-egress-chip")).toHaveTextContent("Probe failed");
+    expect(screen.queryByText("93.184.216.34")).not.toBeInTheDocument();
+  });
 });

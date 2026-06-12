@@ -1,16 +1,17 @@
+import type { ReactNode } from "react";
 import { Clock, ExternalLink, Play, RotateCcw, Zap } from "lucide-react";
 
 import { usePrivacyStore } from "@/hooks/use-privacy";
-import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
 import type { AccountSummary } from "@/features/dashboard/schemas";
 import { formatCompactAccountId } from "@/utils/account-identifiers";
 import {
+  STATUS_DOT,
   normalizeStatus,
   quotaBarColor,
   quotaBarTrack,
 } from "@/utils/account-status";
+import { STATUS_LABELS } from "@/utils/constants";
 import { formatDateTimeInline, formatPercentNullable, formatQuotaResetLabel, formatSlug } from "@/utils/formatters";
 
 type AccountAction = "details" | "resume" | "reauth" | "warmup-toggle";
@@ -21,7 +22,32 @@ export type AccountCardProps = {
   onAction?: (account: AccountSummary, action: AccountAction) => void;
 };
 
-function QuotaBar({
+// Left-edge accent rendered via ::before so it never affects the card's box height.
+const STATUS_ACCENT: Record<string, string> = {
+  active: "before:bg-transparent",
+  paused: "before:bg-amber-500",
+  limited: "before:bg-orange-500",
+  exceeded: "before:bg-red-500",
+  deactivated: "before:bg-zinc-400",
+};
+
+// Text chip shown for non-active states so status never relies on dot colour alone
+// (glanceable + WCAG 1.4.1). Active accounts stay dot-only to avoid header noise.
+const STATUS_CHIP: Record<string, string> = {
+  paused: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  limited: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
+  exceeded: "bg-red-500/15 text-red-700 dark:text-red-400",
+  deactivated: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400",
+};
+
+function percentTextColor(percent: number | null): string {
+  if (percent === null) return "text-muted-foreground";
+  if (percent >= 70) return "text-emerald-600 dark:text-emerald-400";
+  if (percent >= 30) return "text-amber-600 dark:text-amber-400";
+  return "text-red-600 dark:text-red-400";
+}
+
+function QuotaRow({
   label,
   percent,
   resetLabel,
@@ -31,36 +57,25 @@ function QuotaBar({
   resetLabel: string;
 }) {
   const clamped = percent === null ? 0 : Math.max(0, Math.min(100, percent));
-  const hasPercent = percent !== null;
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span
-          className={cn(
-            "tabular-nums font-medium",
-            !hasPercent
-              ? "text-muted-foreground"
-              : clamped >= 70
-                ? "text-emerald-600 dark:text-emerald-400"
-                : clamped >= 30
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-red-600 dark:text-red-400",
-          )}
-        >
-          {formatPercentNullable(percent)}
-        </span>
-      </div>
-      <div className={cn("h-1.5 w-full overflow-hidden rounded-full", quotaBarTrack(clamped))}>
+    <div className="flex items-center gap-2">
+      <span className="w-10 shrink-0 text-[11px] text-muted-foreground">{label}</span>
+      <div className={cn("h-1.5 min-w-0 flex-1 overflow-hidden rounded-full", quotaBarTrack(clamped))}>
         <div
           className={cn("h-full rounded-full transition-all duration-500 ease-out", quotaBarColor(clamped))}
           style={{ width: `${clamped}%` }}
         />
       </div>
-      <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-        <Clock className="h-3 w-3 shrink-0" />
-        <span>{resetLabel}</span>
-      </div>
+      <span className={cn("w-9 shrink-0 text-right text-[11px] tabular-nums font-medium", percentTextColor(percent))}>
+        {formatPercentNullable(percent)}
+      </span>
+      <span
+        className="flex w-[4.25rem] shrink-0 items-center justify-end gap-1 text-[10px] text-muted-foreground"
+        title={`Resets ${resetLabel}`}
+      >
+        <Clock className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+        <span className="truncate">{resetLabel}</span>
+      </span>
     </div>
   );
 }
@@ -68,6 +83,7 @@ function QuotaBar({
 export function AccountCard({ account, showAccountId = false, onAction }: AccountCardProps) {
   const blurred = usePrivacyStore((s) => s.blurred);
   const status = normalizeStatus(account.status);
+  const statusLabel = STATUS_LABELS[status] ?? status;
   const primaryRemaining = account.usage?.primaryRemainingPercent ?? null;
   const secondaryRemaining = account.usage?.secondaryRemainingPercent ?? null;
   const weeklyOnly = account.windowMinutesPrimary == null && account.windowMinutesSecondary != null;
@@ -79,105 +95,135 @@ export function AccountCard({ account, showAccountId = false, onAction }: Accoun
   const compactId = formatCompactAccountId(account.accountId);
   const planLabel = formatSlug(account.planType);
   const emailSubtitle =
-    account.displayName && account.displayName !== account.email
-      ? account.email
-      : null;
-  const idSuffix = showAccountId ? ` | ID ${compactId}` : "";
-  const warmupStatus = account.limitWarmupEnabled ? "Warm-up on" : "Warm-up off";
-  const warmupToggleLabel = `${account.limitWarmupEnabled ? "Disable" : "Enable"} limit warm-up for ${title}`;
+    account.displayName && account.displayName !== account.email ? account.email : null;
+
+  // Identity is always ONE line so an alias can never change the card's height.
+  // Primary label = alias when set, otherwise the display name / email.
+  const primaryLabel = account.alias || title;
+  const secondaryEmail = account.alias ? account.email : emailSubtitle;
+
+  const warmupEnabled = account.limitWarmupEnabled;
+  const warmupToggleLabel = `${warmupEnabled ? "Disable" : "Enable"} limit warm-up for ${title}`;
   const warmupDetail = account.limitWarmup
     ? `${formatSlug(account.limitWarmup.status)} | ${account.limitWarmup.window === "primary" ? "5h" : "weekly"} | ${formatSlug(account.limitWarmup.model)} | ${formatDateTimeInline(account.limitWarmup.completedAt ?? account.limitWarmup.attemptedAt)}`
     : "No attempts";
+  const warmupTitle = `Warm-up ${warmupEnabled ? "on" : "off"} — ${warmupDetail}`;
 
   return (
-    <div className="card-hover rounded-xl border bg-card p-4">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold leading-tight">
-            {blurred
-              ? <span className="privacy-blur">{title}</span>
-              : title}
-          </p>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {planLabel}
-            {!emailSubtitle ? idSuffix : ""}
-          </p>
-          {emailSubtitle ? (
-            <p className="mt-0.5 truncate text-xs text-muted-foreground" title={showAccountId ? `Account ID ${account.accountId}` : undefined}>
-              <span className={blurred ? "privacy-blur" : undefined}>{emailSubtitle}</span>{showAccountId ? ` | ID ${compactId}` : ""}
-            </p>
+    <div
+      className={cn(
+        "card-hover relative flex h-[104px] flex-col overflow-hidden rounded-xl border bg-card p-3",
+        "before:absolute before:left-0 before:top-0 before:h-full before:w-[3px]",
+        STATUS_ACCENT[status] ?? STATUS_ACCENT.deactivated,
+      )}
+    >
+      {/* Header — single fixed line: status dot, identity, plan, quick actions */}
+      <div className="flex items-center gap-2">
+        <span
+          role="img"
+          aria-label={statusLabel}
+          title={statusLabel}
+          className={cn("h-2 w-2 shrink-0 rounded-full", STATUS_DOT[status])}
+        />
+        <span className="min-w-0 flex-1 truncate text-sm leading-tight" title={`${title}${showAccountId ? ` · ID ${compactId}` : ""}`}>
+          <span className={cn("font-semibold", blurred && "privacy-blur")}>{primaryLabel}</span>
+          {secondaryEmail ? (
+            <span className="font-normal text-muted-foreground">
+              {" · "}
+              <span className={blurred ? "privacy-blur" : undefined}>{secondaryEmail}</span>
+            </span>
           ) : null}
-        </div>
-        <StatusBadge status={status} />
-      </div>
+          {showAccountId ? (
+            <span className="font-normal text-muted-foreground">{` · ID ${compactId}`}</span>
+          ) : null}
+        </span>
 
-      {/* Quota bars */}
-      <div className={cn("mt-3.5 grid gap-3", weeklyOnly ? "grid-cols-1" : "grid-cols-2")}>
-        {!weeklyOnly && <QuotaBar label="5h" percent={primaryRemaining} resetLabel={primaryReset} />}
-        <QuotaBar label="Weekly" percent={secondaryRemaining} resetLabel={secondaryReset} />
-      </div>
+        {status !== "active" ? (
+          <span className={cn("shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none", STATUS_CHIP[status])}>
+            {statusLabel}
+          </span>
+        ) : null}
 
-      <div className="mt-3 flex items-center justify-between gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs">
-        <div className="min-w-0">
-          <p className="font-medium">{warmupStatus}</p>
-          <p className="truncate text-[11px] text-muted-foreground">{warmupDetail}</p>
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className={cn(
-            "h-7 gap-1.5 rounded-lg text-xs",
-            account.limitWarmupEnabled
-              ? "text-primary hover:bg-primary/10 hover:text-primary"
-              : "text-muted-foreground hover:text-foreground",
+        <span className="shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+          {planLabel}
+        </span>
+
+        <div className="flex shrink-0 items-center">
+          {status === "paused" && (
+            <IconButton
+              label={`Resume ${title}`}
+              onClick={() => onAction?.(account, "resume")}
+              className="text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+            >
+              <Play className="h-3.5 w-3.5" aria-hidden="true" />
+            </IconButton>
           )}
-          aria-label={warmupToggleLabel}
-          onClick={() => onAction?.(account, "warmup-toggle")}
-        >
-          <Zap className="h-3 w-3" aria-hidden="true" />
-          {account.limitWarmupEnabled ? "On" : "Off"}
-        </Button>
+          {status === "deactivated" && (
+            <IconButton
+              label={`Re-authenticate ${title}`}
+              onClick={() => onAction?.(account, "reauth")}
+              className="text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            </IconButton>
+          )}
+          <IconButton
+            label={warmupToggleLabel}
+            title={warmupTitle}
+            onClick={() => onAction?.(account, "warmup-toggle")}
+            className={
+              warmupEnabled
+                ? "text-primary hover:bg-primary/10 hover:text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            }
+          >
+            <Zap className="h-3.5 w-3.5" aria-hidden="true" />
+          </IconButton>
+          <IconButton
+            label={`Open details for ${title}`}
+            title="Open account details"
+            onClick={() => onAction?.(account, "details")}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </IconButton>
+        </div>
       </div>
 
-      {/* Actions */}
-      <div className="mt-3 flex items-center gap-1.5 border-t pt-3">
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-7 gap-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => onAction?.(account, "details")}
-        >
-          <ExternalLink className="h-3 w-3" />
-          Details
-        </Button>
-        {status === "paused" && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1.5 rounded-lg text-xs text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
-            onClick={() => onAction?.(account, "resume")}
-          >
-            <Play className="h-3 w-3" />
-            Resume
-          </Button>
-        )}
-        {status === "deactivated" && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1.5 rounded-lg text-xs text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
-            onClick={() => onAction?.(account, "reauth")}
-          >
-            <RotateCcw className="h-3 w-3" />
-            Re-auth
-          </Button>
-        )}
+      {/* Quota — pinned to the bottom so weekly-only cards keep the same height */}
+      <div className="mt-auto space-y-1.5 pt-2.5">
+        {!weeklyOnly && <QuotaRow label="5h" percent={primaryRemaining} resetLabel={primaryReset} />}
+        <QuotaRow label="Weekly" percent={secondaryRemaining} resetLabel={secondaryReset} />
       </div>
     </div>
+  );
+}
+
+function IconButton({
+  label,
+  title,
+  className,
+  onClick,
+  children,
+}: {
+  label: string;
+  title?: string;
+  className?: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={title ?? label}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors",
+        className,
+      )}
+    >
+      {children}
+    </button>
   );
 }

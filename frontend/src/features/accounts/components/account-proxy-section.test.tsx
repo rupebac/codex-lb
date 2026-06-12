@@ -70,6 +70,44 @@ describe("AccountProxySection egress UI", () => {
       },
     });
 
+    expect(screen.getByTestId("egress-warning-chip-local_dns_risk")).toHaveTextContent("Local DNS risk");
     expect(screen.getByTestId("egress-warnings")).toHaveTextContent("Local DNS resolution");
+  });
+
+  it("hides stale observed IP when the latest probe failed", () => {
+    renderSection({
+      ...baseAccount,
+      egress: {
+        accountId: "acc-1",
+        status: "probe_failed",
+        observedIp: "93.184.216.34",
+        error: "Connection timed out",
+        configuredProxy: false,
+        proxyRemoteDns: true,
+        sharedWithAccountIds: [],
+        warnings: [],
+      },
+    });
+
+    expect(screen.getByTestId("egress-status-badge")).toHaveTextContent("Probe failed");
+    expect(screen.queryByTestId("egress-observed-ip")).not.toBeInTheDocument();
+    expect(screen.getByTestId("egress-error")).toHaveTextContent("Connection timed out");
+  });
+
+  it("shows shared IP peers in the detail section", () => {
+    renderSection({
+      ...baseAccount,
+      egress: {
+        accountId: "acc-1",
+        status: "shared_egress",
+        observedIp: "93.184.216.34",
+        configuredProxy: false,
+        sharedWithAccountIds: ["acc_peer_one", "acc_peer_two"],
+        warnings: [],
+      },
+    });
+
+    expect(screen.getByTestId("egress-shared-peers")).toHaveTextContent("acc_peer_one");
+    expect(screen.getByTestId("egress-shared-peers")).toHaveTextContent("acc_peer_two");
   });
 });

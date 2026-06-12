@@ -138,3 +138,24 @@ def test_direct_egress_blocks_even_when_non_selectable_peer_shares_ip() -> None:
     settings = Settings(account_egress_guardrail_mode="block")
     filtered = filter_accounts_for_egress_guardrails([active], settings)
     assert filtered == []
+
+
+def test_proxy_remote_dns_null_without_configured_proxy() -> None:
+    account = _account("direct", observed_ip="1.2.3.4", probe_status="ok")
+    status = build_account_egress_statuses([account])[0]
+    assert status.configured_proxy is False
+    assert status.proxy_remote_dns is None
+
+
+def test_proxy_remote_dns_present_when_proxy_configured() -> None:
+    account = _account(
+        "proxy",
+        proxy_host="proxy.example.com",
+        proxy_remote_dns=False,
+        observed_ip="8.8.8.8",
+        probe_status="ok",
+    )
+    status = build_account_egress_statuses([account])[0]
+    assert status.configured_proxy is True
+    assert status.proxy_remote_dns is False
+

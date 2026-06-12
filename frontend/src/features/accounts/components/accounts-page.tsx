@@ -6,6 +6,7 @@ import { AlertMessage } from "@/components/alert-message";
 import { LoadingOverlay } from "@/components/layout/loading-overlay";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useDialogState } from "@/hooks/use-dialog-state";
+import { AccountEgressFleetSummary } from "@/features/accounts/components/account-egress-fleet-summary";
 import { AccountDetail } from "@/features/accounts/components/account-detail";
 import { AccountList } from "@/features/accounts/components/account-list";
 import { AccountsSkeleton } from "@/features/accounts/components/accounts-skeleton";
@@ -131,7 +132,9 @@ export function AccountsPage() {
       {!accountsQuery.data ? (
         <AccountsSkeleton />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
+        <div className="space-y-4">
+          <AccountEgressFleetSummary />
+          <div className="grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
           <div className="rounded-xl border bg-card p-4">
             <AccountList
               accounts={accounts}
@@ -171,6 +174,7 @@ export function AccountsPage() {
               void limitWarmupMutation.mutateAsync({ accountId, enabled })
             }
           />
+          </div>
         </div>
       )}
 

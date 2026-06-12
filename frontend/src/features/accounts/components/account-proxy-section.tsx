@@ -1,12 +1,17 @@
 import { useState } from "react";
 import { AlertTriangle, Globe, KeyRound, Network, Radar, Trash2 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { AccountProxyDialog } from "@/features/accounts/components/account-proxy-dialog";
+import {
+  egressWarningDescription,
+  shouldShowObservedIp,
+} from "@/features/accounts/components/egress-status-chip-utils";
+import { EgressStatusChips } from "@/features/accounts/components/egress-status-chips";
 import { useClearAccountProxy, useProbeAccountEgress } from "@/features/accounts/hooks/use-accounts";
 import type { AccountSummary } from "@/features/accounts/schemas";
+import { formatCompactAccountId } from "@/utils/account-identifiers";
 
 export type AccountProxySectionProps = {
   account: AccountSummary;
@@ -18,36 +23,6 @@ function formatTimestamp(value: string | null | undefined): string {
     return new Date(value).toLocaleString();
   } catch {
     return value;
-  }
-}
-
-function egressStatusLabel(status: string | undefined): string {
-  switch (status) {
-    case "ok":
-      return "Verified";
-    case "direct_egress":
-      return "Direct egress";
-    case "shared_egress":
-      return "Shared IP";
-    case "probe_failed":
-      return "Probe failed";
-    case "unknown":
-    default:
-      return "Not verified";
-  }
-}
-
-function egressStatusVariant(status: string | undefined): "default" | "secondary" | "destructive" | "outline" {
-  switch (status) {
-    case "ok":
-      return "default";
-    case "direct_egress":
-    case "shared_egress":
-      return "secondary";
-    case "probe_failed":
-      return "destructive";
-    default:
-      return "outline";
   }
 }
 
@@ -122,28 +97,32 @@ export function AccountProxySection({ account }: AccountProxySectionProps) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <Badge variant={egressStatusVariant(egress?.status)} data-testid="egress-status-badge">
-          {egressStatusLabel(egress?.status)}
-        </Badge>
-        {egress?.observedIp ? (
-          <span className="font-mono text-muted-foreground" data-testid="egress-observed-ip">
+      <EgressStatusChips egress={egress} />
+
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {shouldShowObservedIp(egress) ? (
+          <span className="font-mono" data-testid="egress-observed-ip">
             {egress.observedIp}
           </span>
         ) : null}
         {egress?.checkedAt ? (
-          <span className="text-muted-foreground">Checked {formatTimestamp(egress.checkedAt)}</span>
+          <span>Checked {formatTimestamp(egress.checkedAt)}</span>
         ) : null}
       </div>
+
+      {egress?.sharedWithAccountIds?.length ? (
+        <p className="text-xs text-muted-foreground" data-testid="egress-shared-peers">
+          Shares observed IP with{" "}
+          {egress.sharedWithAccountIds.map((peerId) => formatCompactAccountId(peerId)).join(", ")}
+        </p>
+      ) : null}
 
       {egress?.warnings?.length ? (
         <ul className="space-y-1 text-xs text-amber-700 dark:text-amber-400" data-testid="egress-warnings">
           {egress.warnings.map((warning) => (
             <li key={warning} className="flex items-center gap-1.5">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-              {warning === "local_dns_risk"
-                ? "Local DNS resolution may leak destination hostnames before the SOCKS5 tunnel."
-                : warning}
+              {egressWarningDescription(warning)}
             </li>
           ))}
         </ul>

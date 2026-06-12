@@ -25,9 +25,9 @@
 
 - [x] 5.1 Update schemas, API client, hooks
 - [x] 5.2 Update `account-proxy-section.tsx` with egress status, warnings, probe button
-- [ ] 5.3 Add a reusable egress status chip helper/component with canonical labels, severity styles, warning chips, and accessible titles/tooltips
-- [ ] 5.4 Render the egress primary chip and compact warning chips in `account-list-item.tsx` without adding nested interactive controls
-- [ ] 5.5 Update `account-proxy-section.tsx` to use the same chip helper/component and keep long warning/error/details in the detail section only
+- [x] 5.3 Add a reusable egress status chip helper/component with canonical labels, severity styles, warning chips, and accessible titles/tooltips
+- [x] 5.4 Render the egress primary chip and compact warning chips in `account-list-item.tsx` without adding nested interactive controls
+- [x] 5.5 Update `account-proxy-section.tsx` to use the same chip helper/component and keep long warning/error/details in the detail section only
 
 ## 6. Tests & Validation
 
@@ -35,4 +35,4 @@
 - [x] 6.2 Load balancer block-mode tests
 - [x] 6.3 Frontend schema/API/component tests
 - [x] 6.4 Run pytest, ruff, frontend build, `openspec validate --specs`
-- [ ] 6.5 Add/extend frontend tests for account-list egress chip labels, warning chips, missing egress fallback, failed-probe stale-IP suppression, and wrapping-safe rendering
+- [x] 6.5 Add/extend frontend tests for account-list egress chip labels, warning chips, missing egress fallback, failed-probe stale-IP suppression, and wrapping-safe rendering

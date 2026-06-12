@@ -150,6 +150,19 @@ describe("AccountEgressStatusSchema", () => {
     expect(parsed.status).toBe("direct_egress");
     expect(parsed.observedIp).toBe("93.184.216.34");
   });
+
+  it("accepts null proxyRemoteDns for direct accounts", () => {
+    const parsed = AccountEgressStatusSchema.parse({
+      accountId: "acc-1",
+      status: "direct_egress",
+      observedIp: "93.184.216.34",
+      configuredProxy: false,
+      proxyRemoteDns: null,
+      sharedWithAccountIds: [],
+      warnings: [],
+    });
+    expect(parsed.proxyRemoteDns).toBeNull();
+  });
 });
 
 describe("AccountEgressReportResponseSchema", () => {

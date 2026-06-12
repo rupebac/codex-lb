@@ -97,7 +97,7 @@ def build_account_egress_statuses(accounts: list[Account]) -> list[AccountEgress
                 checked_at=row.egress_last_checked_at or row.egress_last_observed_at,
                 error=row.egress_last_probe_error if row.egress_last_probe_status == "probe_failed" else None,
                 configured_proxy=_has_configured_proxy(row),
-                proxy_remote_dns=row.proxy_remote_dns,
+                proxy_remote_dns=row.proxy_remote_dns if _has_configured_proxy(row) else None,
                 shared_with_account_ids=shared_with,
                 warnings=_build_warnings(row),
             )

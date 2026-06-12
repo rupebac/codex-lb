@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard · Accounts section — redesign mockup</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root{
+    --background: oklch(0 0 0);
+    --foreground: oklch(0.95 0 0);
+    --card: oklch(0.145 0 0);
+    --primary: oklch(0.68 0.10 245);
+    --muted: oklch(0.22 0 0);
+    --muted-foreground: oklch(0.65 0 0);
+    --border: oklch(0.26 0 0);
+    --green: oklch(0.72 0.16 150);
+    --amber: oklch(0.80 0.15 80);
+    --red: oklch(0.68 0.20 25);
+    --grey: oklch(0.55 0 0);
+  }
+  html,body{background:var(--background);color:var(--foreground);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .bg-card{background:var(--card);} .text-muted{color:var(--muted-foreground);}
+  .border-c{border-color:var(--border);} .bg-muted{background:var(--muted);} .text-primary{color:var(--primary);}
+  .bg-primary-soft{background:color-mix(in oklch,var(--primary) 12%,transparent);}
+  .dot{width:8px;height:8px;border-radius:9999px;flex:0 0 auto;}
+  .bar{height:5px;border-radius:9999px;background:var(--muted);overflow:hidden;flex:1;}
+  .bar > i{display:block;height:100%;border-radius:9999px;}
+  .tag{font-size:10px;line-height:1;padding:2px 6px;border-radius:6px;border:1px solid var(--border);color:var(--muted-foreground);white-space:nowrap;}
+  .hoverable{transition:background .15s,border-color .15s;}
+  .hoverable:hover{border-color:color-mix(in oklch,var(--primary) 40%,var(--border));}
+  .iconbtn{width:26px;height:26px;display:grid;place-items:center;border-radius:7px;color:var(--muted-foreground);}
+  .iconbtn:hover{background:var(--muted);color:var(--foreground);}
+  ::-webkit-scrollbar{width:8px;height:8px;} ::-webkit-scrollbar-thumb{background:oklch(0.6 0 0 / .35);border-radius:9999px;}
+  [data-tip]{position:relative;}
+  [data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:135%;left:50%;transform:translateX(-50%);
+    white-space:nowrap;background:oklch(0.22 0 0);color:var(--foreground);font-size:11px;padding:4px 8px;border-radius:6px;
+    border:1px solid var(--border);z-index:50;pointer-events:none;}
+  .section-rule{height:1px;flex:1;background:var(--border);}
+</style>
+</head>
+<body class="min-h-screen">
+<div class="mx-auto max-w-[1180px] px-6 py-8">
+
+  <div class="flex items-end justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+      <p class="mt-1 text-sm text-muted">Overview, account health, and recent request logs.</p>
+    </div>
+    <div class="inline-flex rounded-lg border border-c bg-card p-0.5 text-xs">
+      <button id="t-current" class="rounded-md px-3 py-1.5 font-medium text-muted">Current</button>
+      <button id="t-cards"   class="rounded-md px-3 py-1.5 font-medium bg-primary-soft text-primary">A · Compact cards</button>
+      <button id="t-rows"    class="rounded-md px-3 py-1.5 font-medium text-muted">B · Dense rows</button>
+    </div>
+  </div>
+
+  <!-- Section header (kept identical to current dashboard) -->
+  <section class="mt-8 space-y-4">
+    <div class="flex items-center gap-3">
+      <h2 class="text-[13px] font-medium uppercase tracking-wider text-muted">Accounts</h2>
+      <div class="section-rule"></div>
+      <span id="fleet" class="hidden items-center gap-1.5 text-[11px] text-muted"></span>
+    </div>
+
+    <!-- ===== CURRENT (for reference) ===== -->
+    <div id="v-current" class="hidden grid gap-4 sm:grid-cols-2 lg:grid-cols-3"></div>
+
+    <!-- ===== A · COMPACT CARDS ===== -->
+    <div id="v-cards" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
+
+    <!-- ===== B · DENSE ROWS ===== -->
+    <div id="v-rows" class="hidden rounded-xl border border-c bg-card divide-y divide-[color:var(--border)]"></div>
+  </section>
+
+  <p class="mt-10 text-center text-[11px] text-muted">Static mockup · illustrative data · ⚡ = warm-up toggle, ↗ = open details. Compare the three tabs above.</p>
+</div>
+
+<script>
+const accounts = [
+  {name:"alice@openai.com", alias:"prod-pool-a", plan:"Pro", id:"8f3a…21c", status:"active",  p:64, w:41, warm:false, warmDetail:"No attempts", reset5:"2h 14m", resetw:"3d 6h"},
+  {name:"bob@openai.com",   alias:null,          plan:"Plus",id:"1b9c…7d2", status:"rate_limited", p:8, w:22, warm:true,  warmDetail:"ok · 5h · gpt-5 · 12:40", reset5:"38m", resetw:"2d 1h"},
+  {name:"carol@acme.io",    alias:"eu-west-team", plan:"Team",id:"4d2e…9a0", status:"active",  p:91, w:77, warm:false, warmDetail:"No attempts", reset5:"4h 02m", resetw:"5d 9h"},
+  {name:"dave@acme.io",     alias:null,          plan:"Pro", id:"77a1…3f5", status:"paused",  p:55, w:60, warm:false, warmDetail:"No attempts", reset5:"1h 09m", resetw:"1d 4h"},
+  {name:"erin@openai.com",  alias:"backup-1",    plan:"Plus",id:"a0b2…cc1", status:"deactivated", p:33, w:12, warm:false, warmDetail:"No attempts", reset5:"2h 51m", resetw:"6h 30m"},
+  {name:"frank@acme.io",    alias:null,          plan:"Pro", id:"e5f6…88b", status:"quota_exceeded", p:0, w:4, warm:true, warmDetail:"pending · weekly · gpt-5", reset5:"—", resetw:"18h"},
+];
+// Render identity on a SINGLE fixed-height line so alias never changes card height.
+function identity(a){
+  return a.alias
+    ? `<span class="font-semibold">${a.alias}</span><span class="text-muted font-normal"> · ${a.name}</span>`
+    : `<span class="font-semibold">${a.name}</span>`;
+}
+
+const sColor = {active:"var(--green)", paused:"var(--grey)", rate_limited:"var(--amber)", quota_exceeded:"var(--red)", deactivated:"var(--red)"};
+const sLabel = {active:"Active", paused:"Paused", rate_limited:"Rate-limited", quota_exceeded:"Quota exceeded", deactivated:"Deactivated"};
+function pColor(v){ return v>=70?"var(--green)":v>=30?"var(--amber)":"var(--red)"; }
+function pText(v){ return v>=70?"color:var(--green)":v>=30?"color:var(--amber)":"color:var(--red)"; }
+
+const ICON_DETAILS = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg>`;
+const ICON_BOLT = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4.5 13.5H11l-1 8.5L18.5 10H12z"/></svg>`;
+const ICON_PLAY = `<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M7 5v14l11-7z"/></svg>`;
+const ICON_REAUTH = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 1 3 6.7M3 12V8m0 4h4"/></svg>`;
+
+function fixAction(a){
+  if(a.status==="paused")      return `<button class="iconbtn" style="color:var(--green)" data-tip="Resume">${ICON_PLAY}</button>`;
+  if(a.status==="deactivated") return `<button class="iconbtn" style="color:var(--amber)" data-tip="Re-authenticate">${ICON_REAUTH}</button>`;
+  return ``;
+}
+
+/* ---------- CURRENT (reference) ---------- */
+document.getElementById("v-current").innerHTML = accounts.map(a=>`
+  <div class="rounded-xl border border-c bg-card p-4">
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <p class="truncate text-sm font-semibold">${a.alias ?? a.name}</p>
+        <p class="mt-0.5 truncate text-xs text-muted">${a.plan} | ID ${a.id}</p>
+        ${a.alias ? `<p class="mt-0.5 truncate text-xs text-muted">${a.name}</p>` : ``}
+      </div>
+      <span class="rounded-md px-2 py-0.5 text-[11px] font-medium" style="background:color-mix(in oklch,${sColor[a.status]} 18%,transparent);color:${sColor[a.status]}">${sLabel[a.status]}</span>
+    </div>
+    <div class="mt-3.5 grid grid-cols-2 gap-3">
+      ${[["5h",a.p,a.reset5],["Weekly",a.w,a.resetw]].map(([l,v,r])=>`
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs"><span class="text-muted">${l}</span><span class="tabular-nums font-medium" style="${pText(v)}">${v}%</span></div>
+          <div class="bar"><i style="width:${v}%;background:${pColor(v)}"></i></div>
+          <div class="flex items-center gap-1 text-[11px] text-muted">&#128339; resets ${r}</div>
+        </div>`).join("")}
+    </div>
+    <div class="mt-3 flex items-center justify-between gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs">
+      <div class="min-w-0"><p class="font-medium">${a.warm?"Warm-up on":"Warm-up off"}</p><p class="truncate text-[11px] text-muted">${a.warmDetail}</p></div>
+      <button class="rounded-lg px-2 py-1 text-xs ${a.warm?'text-primary':'text-muted'}">⚡ ${a.warm?'On':'Off'}</button>
+    </div>
+    <div class="mt-3 flex items-center gap-1.5 border-t border-c pt-3">
+      <button class="rounded-lg px-2 py-1 text-xs text-muted">↗ Details</button>
+      ${a.status==="paused"?`<button class="rounded-lg px-2 py-1 text-xs" style="color:var(--green)">▶ Resume</button>`:""}
+      ${a.status==="deactivated"?`<button class="rounded-lg px-2 py-1 text-xs" style="color:var(--amber)">↻ Re-auth</button>`:""}
+    </div>
+  </div>
+`).join("");
+
+/* ---------- A · COMPACT CARDS (~96px) ---------- */
+document.getElementById("v-cards").innerHTML = accounts.map(a=>`
+  <div class="hoverable group relative flex h-[104px] flex-col rounded-xl border border-c bg-card p-3"
+       style="border-left:3px solid ${a.status==="active"?"transparent":sColor[a.status]}">
+    <!-- header (single fixed line — alias shown inline, truncates, never grows the card) -->
+    <div class="flex items-center gap-2">
+      <span class="dot" style="background:${sColor[a.status]}" data-tip="${sLabel[a.status]}"></span>
+      <span class="min-w-0 flex-1 truncate text-sm" data-tip="${a.name} · ID ${a.id}">${identity(a)}</span>
+      <span class="tag">${a.plan}</span>
+      <!-- inline quick actions (always visible; subtle) -->
+      <div class="flex items-center gap-0.5">
+        ${fixAction(a)}
+        <button class="iconbtn ${a.warm?'text-primary':''}" data-tip="Warm-up ${a.warm?'on':'off'} — ${a.warmDetail}">${ICON_BOLT}</button>
+        <button class="iconbtn" data-tip="Open details">${ICON_DETAILS}</button>
+      </div>
+    </div>
+    <!-- quota: label · bar · % · reset, one line each (reset folded onto the row) -->
+    <div class="mt-auto space-y-1.5 pt-2.5">
+      ${[["5h",a.p,a.reset5],["Wk",a.w,a.resetw]].map(([l,v,r])=>`
+        <div class="flex items-center gap-2">
+          <span class="w-6 text-[11px] text-muted">${l}</span>
+          <span class="bar" data-tip="resets ${r}"><i style="width:${v}%;background:${pColor(v)}"></i></span>
+          <span class="w-9 text-right text-[11px] tabular-nums font-medium" style="${pText(v)}">${v}%</span>
+          <span class="w-16 text-right text-[10px] text-muted">${r}</span>
+        </div>`).join("")}
+    </div>
+  </div>
+`).join("");
+
+/* ---------- B · DENSE ROWS (~52px) ---------- */
+document.getElementById("v-rows").innerHTML = accounts.map(a=>`
+  <div class="hoverable group flex h-[52px] items-center gap-3 px-3.5"
+       style="box-shadow:inset 3px 0 0 ${a.status==="active"?"transparent":sColor[a.status]}">
+    <span class="dot" style="background:${sColor[a.status]}" data-tip="${sLabel[a.status]}"></span>
+    <div class="w-52 min-w-0">
+      <div class="truncate text-sm" data-tip="${a.name} · ID ${a.id}">${identity(a)}</div>
+      <div class="text-[11px] text-muted">${a.plan} · ${sLabel[a.status]}</div>
+    </div>
+    <div class="flex flex-1 items-center gap-2" data-tip="resets ${a.reset5}">
+      <span class="w-5 text-[10px] text-muted">5h</span>
+      <span class="bar"><i style="width:${a.p}%;background:${pColor(a.p)}"></i></span>
+      <span class="w-9 text-right text-[11px] tabular-nums" style="${pText(a.p)}">${a.p}%</span>
+    </div>
+    <div class="flex flex-1 items-center gap-2" data-tip="resets ${a.resetw}">
+      <span class="w-5 text-[10px] text-muted">Wk</span>
+      <span class="bar"><i style="width:${a.w}%;background:${pColor(a.w)}"></i></span>
+      <span class="w-9 text-right text-[11px] tabular-nums" style="${pText(a.w)}">${a.w}%</span>
+    </div>
+    <div class="flex items-center gap-0.5">
+      ${fixAction(a)}
+      <button class="iconbtn ${a.warm?'text-primary':''}" data-tip="Warm-up ${a.warm?'on':'off'} — ${a.warmDetail}">${ICON_BOLT}</button>
+      <button class="iconbtn" data-tip="Open details">${ICON_DETAILS}</button>
+    </div>
+  </div>
+`).join("");
+
+/* fleet count chips (shown for rows/cards) */
+const fleet = document.getElementById("fleet");
+const counts = accounts.reduce((m,a)=>{const k=a.status==="active"?"ok":"issue";m[k]=(m[k]||0)+1;return m;},{});
+fleet.innerHTML = `<span class="inline-flex items-center gap-1"><span class="dot" style="background:var(--green)"></span>${counts.ok||0} healthy</span>
+  <span class="inline-flex items-center gap-1"><span class="dot" style="background:var(--amber)"></span>${counts.issue||0} need attention</span>`;
+
+/* ---------- toggle ---------- */
+const tabs={current:"t-current",cards:"t-cards",rows:"t-rows"};
+const views={current:"v-current",cards:"v-cards",rows:"v-rows"};
+function show(key){
+  const on="rounded-md px-3 py-1.5 font-medium bg-primary-soft text-primary";
+  const off="rounded-md px-3 py-1.5 font-medium text-muted";
+  for(const k in tabs) document.getElementById(tabs[k]).className = k===key?on:off;
+  for(const k in views){const el=document.getElementById(views[k]); el.classList.toggle("hidden", k!==key);
+    if(k==="current") el.classList.toggle("grid", k===key);}
+  fleet.classList.toggle("hidden", key==="current");
+  fleet.classList.toggle("flex", key!=="current");
+}
+document.getElementById("t-current").onclick=()=>show("current");
+document.getElementById("t-cards").onclick=()=>show("cards");
+document.getElementById("t-rows").onclick=()=>show("rows");
+show("cards");
+</script>
+</body>
+</html>

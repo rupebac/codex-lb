@@ -7,6 +7,8 @@ import { MiniQuotaBar } from "@/components/mini-quota-bar";
 import type { AccountSummary } from "@/features/accounts/schemas";
 import { normalizeStatus } from "@/utils/account-status";
 import { formatCompactAccountId } from "@/utils/account-identifiers";
+import { shouldShowAccountListEgressChips } from "@/features/accounts/components/egress-status-chip-utils";
+import { EgressStatusChips } from "@/features/accounts/components/egress-status-chips";
 import { formatDateTimeInline, formatPercentNullable, formatQuotaResetLabel, formatSlug } from "@/utils/formatters";
 
 export type AccountListItemProps = {
@@ -65,9 +67,19 @@ export function AccountListItem({ account, selected, showAccountId = false, onSe
         {showPrimaryRow ? <MiniQuotaRow label="5h" percent={primary} resetAt={account.resetAtPrimary} /> : null}
         {showSecondaryRow ? <MiniQuotaRow label="Weekly" percent={secondary} resetAt={account.resetAtSecondary} /> : null}
       </div>
-      <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-        <span>{warmupLabel}</span>
-        <span className="truncate">{warmupMeta}</span>
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+        {shouldShowAccountListEgressChips(account) ? (
+          <EgressStatusChips egress={account.egress} compact primaryTestId="account-list-egress-chip" />
+        ) : null}
+        <div
+          className={cn(
+            "flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground",
+            shouldShowAccountListEgressChips(account) ? "ml-auto flex-1 justify-end" : "w-full justify-between",
+          )}
+        >
+          <span className="shrink-0">{warmupLabel}</span>
+          <span className="truncate">{warmupMeta}</span>
+        </div>
       </div>
     </button>
   );

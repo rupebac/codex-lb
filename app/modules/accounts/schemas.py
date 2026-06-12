@@ -132,7 +132,7 @@ class AccountEgressStatus(DashboardModel):
     checked_at: datetime | None = None
     error: str | None = None
     configured_proxy: bool = False
-    proxy_remote_dns: bool = True
+    proxy_remote_dns: bool | None = None
     shared_with_account_ids: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 

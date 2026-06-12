@@ -22,6 +22,7 @@ import type { AccountEgressStatus, AccountProxyInput, AccountProxySummary } from
 
 function invalidateAccountRelatedQueries(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ["accounts", "list"] });
+  void queryClient.invalidateQueries({ queryKey: ["accounts", "egress"] });
   void queryClient.invalidateQueries({ queryKey: ["dashboard", "overview"] });
   void queryClient.invalidateQueries({ queryKey: ["dashboard", "projections"] });
 }
@@ -202,7 +203,6 @@ export function useProbeAccountEgress() {
     onSuccess: () => {
       toast.success("Egress probe completed");
       invalidateAccountRelatedQueries(queryClient);
-      void queryClient.invalidateQueries({ queryKey: ["accounts", "egress"] });
     },
     onError: (error: Error) => {
       toast.error(error.message || "Egress probe failed");
