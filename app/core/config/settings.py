@@ -22,7 +22,6 @@ ENV_FILES = (BASE_DIR / ".env", BASE_DIR / ".env.local")
 
 DOCKER_DATA_DIR = Path("/var/lib/codex-lb")
 DOCKER_CALLBACK_HOST = "0.0.0.0"
-DEFAULT_OAUTH_REDIRECT_URI = "http://localhost:1455/auth/callback"
 
 
 def _in_container() -> bool:
@@ -162,7 +161,7 @@ class Settings(BaseSettings):
     proxy_request_budget_seconds: float = Field(default=600.0, gt=0)
     http_responses_stream_request_budget_seconds: float = Field(default=7200.0, gt=0)
     compact_request_budget_seconds: float = Field(default=180.0, gt=0)
-    stream_idle_timeout_seconds: float = 600.0
+    stream_idle_timeout_seconds: float = Field(default=7200.0, gt=0)
     sse_keepalive_interval_seconds: float = Field(default=10.0, ge=0)
     proxy_downstream_websocket_idle_timeout_seconds: float = Field(default=120.0, gt=0)
     # Applies to both upstream SSE event buffering and upstream websocket message
@@ -176,33 +175,26 @@ class Settings(BaseSettings):
     oauth_originator: str = "codex_chatgpt_desktop"
     oauth_scope: str = "openid profile email"
     oauth_timeout_seconds: float = 30.0
-    oauth_redirect_uri: str = DEFAULT_OAUTH_REDIRECT_URI
+    oauth_redirect_uri: str = "http://localhost:1455/auth/callback"
     oauth_callback_host: str = _default_oauth_callback_host()
     oauth_callback_port: int = 1455  # Do not change the port. OpenAI dislikes changes.
     token_refresh_timeout_seconds: float = 8.0
-    account_token_refresh_jitter_hours: float = Field(
-        default=18.0,
-        ge=0.0,
-        # Upper bound: half the default refresh interval expressed in
-        # hours (8 days * 24 / 2 = 96h). Jitter is an early-refresh
-        # offset, so this cap keeps the default schedule from starting
-        # earlier than halfway through the interval. Operators running
-        # custom ``token_refresh_interval_days`` values should adjust
-        # accordingly.
-        le=96.0,
-    )
-    account_proxy_probe_timeout_seconds: float = Field(default=10.0, gt=0)
-    account_proxy_failure_threshold: int = Field(default=3, ge=1)
-    account_proxy_failure_window_seconds: float = Field(default=60.0, gt=0)
-    http_connector_limit_per_account_direct: int = Field(default=20, ge=1)
-    http_connector_limit_per_host_per_account_direct: int = Field(default=10, ge=1)
+    auth_guardian_enabled: bool = False
+    auth_guardian_interval_seconds: int = Field(default=21600, gt=0)
+    auth_guardian_max_refresh_age_seconds: int = Field(default=43200, gt=0)
+    auth_guardian_batch_size: int = Field(default=100, gt=0)
+    auth_guardian_concurrency: int = Field(default=3, gt=0)
+    auth_guardian_jitter_seconds: float = Field(default=300.0, ge=0)
+    auth_guardian_failure_backoff_base_seconds: float = Field(default=300.0, ge=0)
+    auth_guardian_failure_backoff_max_seconds: float = Field(default=3600.0, ge=0)
     transcription_request_budget_seconds: float = Field(default=120.0, gt=0)
     token_refresh_interval_days: int = 8
     usage_fetch_timeout_seconds: float = 10.0
     usage_fetch_max_retries: int = 2
     usage_refresh_enabled: bool = True
-    usage_refresh_interval_seconds: int = Field(default=120, gt=0)
+    usage_refresh_interval_seconds: int = Field(default=60, gt=0)
     openai_cache_affinity_max_age_seconds: int = Field(default=1800, gt=0)
+    warmup_model: str = "gpt-5.4-mini"
     openai_prompt_cache_key_derivation_enabled: bool = True
     http_responses_session_bridge_enabled: bool = True
     http_responses_session_bridge_request_budget_seconds: float = Field(default=7200.0, gt=0)
@@ -217,6 +209,8 @@ class Settings(BaseSettings):
     http_responses_session_bridge_advertise_base_url: str | None = None
     sticky_session_cleanup_enabled: bool = True
     sticky_session_cleanup_interval_seconds: int = Field(default=300, gt=0)
+    quota_planner_scheduler_enabled: bool = False
+    quota_planner_tick_seconds: int = Field(default=300, gt=0)
     encryption_key_file: Path = DEFAULT_ENCRYPTION_KEY_FILE
     database_migrations_fail_fast: bool = True
     log_proxy_request_shape: bool = False
@@ -247,7 +241,7 @@ class Settings(BaseSettings):
     # cap is lifted in the same change that introduces fan-out.
     model_registry_enabled: bool = True
     model_registry_refresh_interval_seconds: int = Field(default=300, gt=0)
-    model_registry_client_version: str = "0.139.0"
+    model_registry_client_version: str = "0.101.0"
     model_context_window_overrides: Annotated[dict[str, int], NoDecode] = Field(default_factory=dict)
     proxy_unauthenticated_client_cidrs: Annotated[list[str], NoDecode] = Field(default_factory=list)
     firewall_trust_proxy_headers: bool = False
@@ -269,7 +263,6 @@ class Settings(BaseSettings):
 
     # Logging
     log_format: str = "text"  # "text" or "json"
-    log_level: str = "INFO"
 
     # Leader election
     leader_election_enabled: bool = False
@@ -462,6 +455,16 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("upstream_compact_timeout_seconds must be greater than zero")
         return value
+
+    @field_validator("warmup_model", mode="before")
+    @classmethod
+    def _normalize_warmup_model(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise TypeError("warmup_model must be a string")
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("warmup_model must not be blank")
+        return normalized
 
     @model_validator(mode="after")
     def _apply_data_dir_defaults(self) -> "Settings":
