@@ -54,7 +54,7 @@ describe("DashboardSettingsSchema", () => {
     });
 
     expect(parsed.upstreamStreamTransport).toBe("default");
-    expect(parsed.routingStrategy).toBe("usage_weighted");
+    expect(parsed.routingStrategy).toBe("capacity_weighted");
     expect(parsed.singleAccountId).toBeNull();
     expect(parsed.openaiCacheAffinityMaxAgeSeconds).toBe(300);
     expect(parsed.limitWarmupEnabled).toBe(false);

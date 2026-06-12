@@ -392,7 +392,7 @@ export function createDashboardSettings(
 		stickyThreadsEnabled: true,
 		upstreamStreamTransport: "default",
 		preferEarlierResetAccounts: false,
-		routingStrategy: "usage_weighted",
+		routingStrategy: "capacity_weighted",
 		relativeAvailabilityPower: 2,
 		relativeAvailabilityTopK: 5,
 		openaiCacheAffinityMaxAgeSeconds: 300,
