@@ -114,6 +114,7 @@ class _FakeApiKeysRepository(ApiKeysRepositoryProtocol):
         enforced_model: str | None | _Unset = _UNSET,
         enforced_reasoning_effort: str | None | _Unset = _UNSET,
         enforced_service_tier: str | None | _Unset = _UNSET,
+        traffic_class: str | _Unset = _UNSET,
         account_assignment_scope_enabled: bool | _Unset = _UNSET,
         expires_at: datetime | None | _Unset = _UNSET,
         is_active: bool | _Unset = _UNSET,
@@ -132,6 +133,7 @@ class _FakeApiKeysRepository(ApiKeysRepositoryProtocol):
             "enforced_model": enforced_model,
             "enforced_reasoning_effort": enforced_reasoning_effort,
             "enforced_service_tier": enforced_service_tier,
+            "traffic_class": traffic_class,
             "account_assignment_scope_enabled": account_assignment_scope_enabled,
             "expires_at": expires_at,
             "is_active": is_active,
@@ -660,6 +662,37 @@ async def test_update_key_normalizes_service_tier_alias() -> None:
     )
 
     assert updated.enforced_service_tier == "priority"
+
+
+@pytest.mark.asyncio
+async def test_create_key_defaults_to_foreground_traffic_class() -> None:
+    repo = _FakeApiKeysRepository()
+    service = ApiKeysService(repo)
+
+    created = await service.create_key(ApiKeyCreateData(name="traffic-default", allowed_models=None))
+
+    assert created.traffic_class == "foreground"
+    stored = await repo.get_by_id(created.id)
+    assert stored is not None
+    assert stored.traffic_class == "foreground"
+
+
+@pytest.mark.asyncio
+async def test_update_key_persists_opportunistic_traffic_class() -> None:
+    repo = _FakeApiKeysRepository()
+    service = ApiKeysService(repo)
+
+    created = await service.create_key(ApiKeyCreateData(name="traffic-update", allowed_models=None))
+
+    updated = await service.update_key(
+        created.id,
+        ApiKeyUpdateData(traffic_class="opportunistic", traffic_class_set=True),
+    )
+
+    assert updated.traffic_class == "opportunistic"
+    stored = await repo.get_by_id(created.id)
+    assert stored is not None
+    assert stored.traffic_class == "opportunistic"
 
 
 @pytest.mark.asyncio

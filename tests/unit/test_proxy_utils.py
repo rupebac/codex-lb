@@ -58,6 +58,80 @@ def test_relative_availability_settings_default_when_stored_values_are_null():
     assert proxy_service._relative_availability_top_k(settings) == 5
 
 
+def test_routing_strategy_accepts_all_dashboard_values():
+    for strategy in (
+        "usage_weighted",
+        "round_robin",
+        "capacity_weighted",
+        "relative_availability",
+        "fill_first",
+        "sequential_drain",
+        "reset_drain",
+        "single_account",
+    ):
+        settings = cast(Any, SimpleNamespace(routing_strategy=strategy))
+
+        assert proxy_service._routing_strategy(settings) == strategy
+
+
+def test_single_account_scope_intersects_api_key_scope():
+    assert proxy_service._apply_single_account_scope(
+        None,
+        routing_strategy="single_account",
+        single_account_id="acc_a",
+    ) == {"acc_a"}
+    assert proxy_service._apply_single_account_scope(
+        {"acc_a", "acc_b"},
+        routing_strategy="single_account",
+        single_account_id="acc_a",
+    ) == {"acc_a"}
+    assert proxy_service._apply_single_account_scope(
+        {"acc_b"},
+        routing_strategy="single_account",
+        single_account_id="acc_a",
+    ) == set()
+    assert proxy_service._apply_single_account_scope(
+        {"acc_b"},
+        routing_strategy="capacity_weighted",
+        single_account_id="acc_a",
+    ) == {"acc_b"}
+
+
+def test_api_key_traffic_class_defaults_and_allows_opportunistic():
+    created_at = utcnow()
+    foreground = ApiKeyData(
+        id="key_foreground",
+        name="foreground",
+        key_prefix="sk-clb-test",
+        allowed_models=None,
+        enforced_model=None,
+        enforced_reasoning_effort=None,
+        enforced_service_tier=None,
+        expires_at=None,
+        is_active=True,
+        created_at=created_at,
+        last_used_at=None,
+    )
+    opportunistic = ApiKeyData(
+        id="key_opportunistic",
+        name="opportunistic",
+        key_prefix="sk-clb-test",
+        allowed_models=None,
+        enforced_model=None,
+        enforced_reasoning_effort=None,
+        enforced_service_tier=None,
+        traffic_class="opportunistic",
+        expires_at=None,
+        is_active=True,
+        created_at=created_at,
+        last_used_at=None,
+    )
+
+    assert proxy_service._api_key_traffic_class(None) == "foreground"
+    assert proxy_service._api_key_traffic_class(foreground) == "foreground"
+    assert proxy_service._api_key_traffic_class(opportunistic) == "opportunistic"
+
+
 def test_websocket_precreated_retry_error_code_does_not_replay_missing_tool_output():
     request_state = proxy_service._WebSocketRequestState(
         request_id="req_missing_tool_precreated",
@@ -1496,7 +1570,11 @@ async def test_select_codex_control_account_without_budget_uses_balancer(monkeyp
         reallocate_sticky=False,
         sticky_max_age_seconds=123,
         account_ids=None,
+        routing_strategy="usage_weighted",
+        relative_availability_power=2.0,
+        relative_availability_top_k=5,
         budget_threshold_pct=95.0,
+        traffic_class="foreground",
     )
 
 

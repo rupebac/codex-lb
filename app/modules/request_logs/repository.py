@@ -190,6 +190,7 @@ class RequestLogsRepository:
         session_id: str | None = None,
         plan_type: str | None = None,
         source: str | None = None,
+        request_kind: str | None = None,
     ) -> RequestLog:
         async with sqlite_writer_section():
             resolved_request_id = ensure_request_id(request_id)
@@ -201,6 +202,7 @@ class RequestLogsRepository:
                 api_key_id=api_key_id,
                 session_id=session_id,
                 request_id=resolved_request_id,
+                request_kind=request_kind or "normal",
                 model=model,
                 plan_type=resolved_plan_type,
                 source=source,

@@ -34,7 +34,14 @@ from app.core.auth.refresh import (
     pop_token_refresh_timeout_override,
     push_token_refresh_timeout_override,
 )
-from app.core.balancer import PERMANENT_FAILURE_CODES, RoutingStrategy, failover_decision
+from app.core.balancer import (
+    PERMANENT_FAILURE_CODES,
+    TRAFFIC_CLASS_FOREGROUND,
+    TRAFFIC_CLASS_OPPORTUNISTIC,
+    RoutingStrategy,
+    TrafficClass,
+    failover_decision,
+)
 from app.core.balancer.rendezvous_hash import select_node
 from app.core.balancer.types import ClassifiedFailure, UpstreamError
 from app.core.clients.files import FileProxyError, pop_files_timeout_overrides, push_files_timeout_overrides
@@ -5283,13 +5290,23 @@ class ProxyService:
             else None
         )
         settings = await get_settings_cache().get()
+        routing_strategy = _routing_strategy(settings)
+        scoped_account_ids = _apply_single_account_scope(
+            scoped_account_ids,
+            routing_strategy=routing_strategy,
+            single_account_id=getattr(settings, "single_account_id", None),
+        )
         selection = await self._load_balancer.select_account(
             sticky_key=affinity.key,
             sticky_kind=affinity.kind,
             reallocate_sticky=affinity.reallocate_sticky,
             sticky_max_age_seconds=affinity.max_age_seconds,
             account_ids=scoped_account_ids,
+            routing_strategy=routing_strategy,
+            relative_availability_power=_relative_availability_power(settings),
+            relative_availability_top_k=_relative_availability_top_k(settings),
             budget_threshold_pct=settings.sticky_reallocation_budget_threshold_pct,
+            traffic_class=_api_key_traffic_class(api_key),
         )
         if selection.account is None:
             return None
@@ -11929,6 +11946,12 @@ class ProxyService:
         try:
             with anyio.fail_after(remaining_budget):
                 settings = await get_settings_cache().get()
+                scoped_account_ids = _apply_single_account_scope(
+                    scoped_account_ids,
+                    routing_strategy=routing_strategy,
+                    single_account_id=getattr(settings, "single_account_id", None),
+                )
+                traffic_class = _api_key_traffic_class(api_key)
                 preferred_account_selectable = (
                     preferred_account_id is not None
                     and preferred_account_id not in excluded_account_ids_set
@@ -11958,6 +11981,7 @@ class ProxyService:
                         budget_threshold_pct=settings.sticky_reallocation_budget_threshold_pct,
                         lease_kind=lease_kind,
                         estimated_lease_tokens=estimated_lease_tokens,
+                        traffic_class=traffic_class,
                     )
                     if preferred_selection.account is not None:
                         logger.info(
@@ -11986,6 +12010,7 @@ class ProxyService:
                     budget_threshold_pct=settings.sticky_reallocation_budget_threshold_pct,
                     lease_kind=lease_kind,
                     estimated_lease_tokens=estimated_lease_tokens,
+                    traffic_class=traffic_class,
                 )
                 if selection.account is not None and selection.account.id in excluded_account_ids_set:
                     return AccountSelection(
@@ -14452,13 +14477,40 @@ def _websocket_receive_timeout_for_pending_requests(
 
 def _routing_strategy(settings: DashboardSettings) -> RoutingStrategy:
     value = settings.routing_strategy or "capacity_weighted"
-    if value == "round_robin":
-        return "round_robin"
-    if value == "usage_weighted":
-        return "usage_weighted"
-    if value == "relative_availability":
-        return "relative_availability"
+    if value in {
+        "usage_weighted",
+        "round_robin",
+        "capacity_weighted",
+        "relative_availability",
+        "fill_first",
+        "sequential_drain",
+        "reset_drain",
+        "single_account",
+    }:
+        return cast(RoutingStrategy, value)
     return "capacity_weighted"
+
+
+def _api_key_traffic_class(api_key: ApiKeyData | None) -> TrafficClass:
+    if api_key is not None and api_key.traffic_class == TRAFFIC_CLASS_OPPORTUNISTIC:
+        return TRAFFIC_CLASS_OPPORTUNISTIC
+    return TRAFFIC_CLASS_FOREGROUND
+
+
+def _apply_single_account_scope(
+    scoped_account_ids: set[str] | None,
+    *,
+    routing_strategy: RoutingStrategy,
+    single_account_id: str | None,
+) -> set[str] | None:
+    if routing_strategy != "single_account":
+        return scoped_account_ids
+    normalized_account_id = (single_account_id or "").strip()
+    if not normalized_account_id:
+        return scoped_account_ids
+    if scoped_account_ids is not None and normalized_account_id not in scoped_account_ids:
+        return set()
+    return {normalized_account_id}
 
 
 def _relative_availability_power(settings: DashboardSettings) -> float:
