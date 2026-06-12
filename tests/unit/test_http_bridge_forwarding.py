@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import aiohttp
 import pytest
@@ -345,7 +346,7 @@ async def test_owner_forward_uses_direct_session_without_env_proxy(monkeypatch: 
     assert '"type":"response.failed"' in events[0]
     assert '"code":"stream_incomplete"' in events[0]
     assert captured["trust_env"] is False
-    session_headers = captured["session_headers"]
+    session_headers = cast(dict[str, str], captured["session_headers"])
     assert session_headers["originator"] == "codex_cli_rs"
     assert session_headers["User-Agent"].startswith("codex_cli_rs/0.139.0 ")
     assert "aiohttp" not in session_headers["User-Agent"]

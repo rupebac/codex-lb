@@ -269,6 +269,10 @@ def _additional_entry(
     )
 
 
+def _stale_additional_usage_recorded_at(now: datetime) -> datetime:
+    return load_balancer_module._additional_usage_fresh_since(now) - timedelta(seconds=1)
+
+
 @asynccontextmanager
 async def _repo_factory(
     accounts_repo: StubAccountsRepository,
@@ -2465,7 +2469,7 @@ async def test_select_account_returns_data_unavailable_error_for_mapped_model(mo
                 account_id=account.id,
                 window="primary",
                 used_percent=20.0,
-                recorded_at=now - timedelta(seconds=181),
+                recorded_at=_stale_additional_usage_recorded_at(now),
             )
         }
     )
@@ -2603,7 +2607,7 @@ async def test_select_account_returns_data_unavailable_when_secondary_window_is_
                 window="secondary",
                 used_percent=20.0,
                 reset_at=now_epoch + 3600,
-                recorded_at=now - timedelta(seconds=181),
+                recorded_at=_stale_additional_usage_recorded_at(now),
             )
         },
     )
@@ -2686,7 +2690,7 @@ async def test_select_account_allows_primary_only_account_when_other_account_has
                 window="secondary",
                 used_percent=20.0,
                 reset_at=now_epoch + 3600,
-                recorded_at=now - timedelta(seconds=181),
+                recorded_at=_stale_additional_usage_recorded_at(now),
             ),
         },
     )
